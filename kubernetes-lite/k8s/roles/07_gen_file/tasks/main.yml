@@ -28,7 +28,7 @@
   register: join_worker_result
 
 - name: Upload lại certs để lấy certificate key (cho master join)
-  command: kubeadm init phase upload-certs --upload-certs --config /root/kubeadm-config.yaml
+  command: kubeadm init phase upload-certs --upload-certs
   register: upload_certs_result
 
 - name: Extract certificate key

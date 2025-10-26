@@ -1,0 +1,26 @@
+---
+- name: Enable FRR bgpd daemon
+  lineinfile:
+    path: /etc/frr/daemons
+    regexp: '^bgpd='
+    line: 'bgpd=yes'
+
+- name: Copy FRR config for client
+  template:
+    src: frr_client.conf.j2
+    dest: /etc/frr/frr.conf
+    owner: frr
+    group: frr
+    mode: '0640'
+  when: frr_mode == 'client'
+  notify: Restart FRR
+
+- name: Copy FRR config for route-reflector
+  template:
+    src: frr_rr.conf.j2
+    dest: /etc/frr/frr.conf
+    owner: frr
+    group: frr
+    mode: '0640'
+  when: frr_mode == 'rr'
+  notify: Restart FRR

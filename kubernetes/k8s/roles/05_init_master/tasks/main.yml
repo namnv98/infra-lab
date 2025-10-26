@@ -1,0 +1,61 @@
+- name: Kube VIP Issue #684 workaround - sửa đường dẫn kubeconfig sang super-admin.conf
+  ansible.builtin.command: >
+    sed -i 's|path: /etc/kubernetes/admin.conf|path: /etc/kubernetes/super-admin.conf|' /etc/kubernetes/manifests/kube-vip.yaml
+  become: true
+
+- name: Create etcd PKI directory
+  ansible.builtin.file:
+    path: /etc/kubernetes/pki/etcd
+    state: directory
+
+- name: Copy toàn bộ thư mục chứng chỉ etcd
+  ansible.builtin.copy:
+    src: etcd-config/
+    dest: /etc/kubernetes/pki/etcd/
+
+- name: Generate kubeadm config file
+  ansible.builtin.template:
+    src: kubeadm-config.yaml.j2
+    dest: /root/kubeadm-config.yaml
+
+#- name: Initialize Kubernetes master using kubeadm config
+#  command: kubeadm init --config /root/kubeadm-config.yaml --upload-certs
+#  register: kubeadm_init_output
+
+- name: Initialize Kubernetes master
+  command: >
+    kubeadm init
+    --pod-network-cidr={{ pod_network_cidr }}
+    --apiserver-cert-extra-sans={{ apiserver_cert_sans | join(',') }}
+    --apiserver-advertise-address={{ apiserver_advertise_address }}
+    --control-plane-endpoint={{ vip_address }}
+    --cri-socket {{ cri_socket }}
+  register: kubeadm_init_output
+
+- name: Revert Kube VIP Issue #684 workaround - dùng lại admin.conf
+  ansible.builtin.command: >
+    sed -i 's|path: /etc/kubernetes/super-admin.conf|path: /etc/kubernetes/admin.conf|' /etc/kubernetes/manifests/kube-vip.yaml
+  become: true
+
+- name: Hiển thị kết quả kubeadm init
+  debug:
+    var: kubeadm_init_output.stdout_lines
+
+- name: Wait for Kubernetes API server to be ready
+  uri:
+    url: https://localhost:6443/healthz
+    method: GET
+    status_code: 200
+    validate_certs: no
+  register: result
+  retries: 10
+  delay: 6
+  until: result.status == 200
+
+- name: Copy kubeconfig for user namnv
+  become: true
+  become_user: namnv
+  shell: |
+    mkdir -p /home/namnv/.kube
+    cp -f /etc/kubernetes/admin.conf /home/namnv/.kube/config
+    chown -R namnv:namnv /home/namnv/.kube

@@ -1,0 +1,65 @@
+---
+- name: Gỡ cài đặt cụm ETCD hoàn toàn
+  hosts: etcd
+  become: yes
+
+  tasks:
+    - name: Dừng và vô hiệu hóa dịch vụ etcd
+      ansible.builtin.systemd:
+        name: etcd
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: Xóa file systemd etcd
+      ansible.builtin.file:
+        path: /etc/systemd/system/etcd.service
+        state: absent
+
+    - name: Reload systemd sau khi xóa service
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Xóa binary etcd và etcdctl
+      ansible.builtin.file:
+        path: "/usr/local/bin/{{ item }}"
+        state: absent
+      loop:
+        - etcd
+        - etcdctl
+
+    - name: Xóa thư mục cấu hình, dữ liệu và chứng chỉ
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/etcd
+        - /var/lib/etcd
+
+    - name: Xóa user và group etcd
+      ansible.builtin.user:
+        name: etcd
+        state: absent
+        remove: yes
+      ignore_errors: yes
+
+    - name: Xóa group etcd
+      ansible.builtin.group:
+        name: etcd
+        state: absent
+      ignore_errors: yes
+
+    - name: Kiểm tra xóa thành công
+      ansible.builtin.shell: |
+        which etcd || echo "etcd binary removed"
+      register: check
+      changed_when: false
+
+    - debug:
+        var: check.stdout
+
+    - name: Xóa thư mục pki local nếu có
+      delegate_to: localhost
+      ansible.builtin.file:
+        path: ./pki
+        state: absent

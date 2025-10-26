@@ -1,0 +1,78 @@
+---
+# tasks/generate_cert.yml
+# Nhiệm vụ: Tạo key, CSR và ký chứng chỉ (server/client) bằng CA
+
+# 1 Sinh private key
+- name: Tạo private key cho {{ cert.name }}
+  ansible.builtin.command:
+    cmd: openssl genrsa -out {{ pki_dir }}/{{ cert.name }}.key 4096
+  args:
+    creates: "{{ pki_dir }}/{{ cert.name }}.key"
+
+# 2 Nếu chứng chỉ có SAN (Subject Alternative Name) → tạo file cấu hình openssl
+- name: Tạo file cấu hình SAN (nếu cần)
+  ansible.builtin.copy:
+    dest: "{{ pki_dir }}/{{ cert.name }}-openssl.cnf"
+    content: |
+      [req]
+      default_bits       = 4096
+      prompt             = no
+      default_md         = sha256
+      distinguished_name = dn
+      req_extensions     = SAN
+
+      [dn]
+      CN = {{ cert.cn }}
+
+      [SAN]
+      subjectAltName = {{ cert.san }}
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "0644"
+  when: cert.san is defined and cert.san | length > 0
+
+# 3 Tạo file yêu cầu chứng chỉ (CSR)
+- name: Tạo CSR cho {{ cert.name }}
+  ansible.builtin.command:
+    cmd: >
+      {% if cert.san is defined and cert.san | length > 0 %}
+      openssl req -new -key {{ pki_dir }}/{{ cert.name }}.key
+      -out {{ pki_dir }}/{{ cert.name }}.csr
+      -config {{ pki_dir }}/{{ cert.name }}-openssl.cnf
+      {% else %}
+      openssl req -new -key {{ pki_dir }}/{{ cert.name }}.key
+      -subj "/CN={{ cert.cn }}"
+      -out {{ pki_dir }}/{{ cert.name }}.csr
+      {% endif %}
+  args:
+    creates: "{{ pki_dir }}/{{ cert.name }}.csr"
+
+# 4 Dùng CA ký chứng chỉ
+- name: Ký chứng chỉ {{ cert.name }} bằng CA
+  ansible.builtin.command:
+    cmd: >
+      {% if cert.san is defined and cert.san | length > 0 %}
+      openssl x509 -req -in {{ pki_dir }}/{{ cert.name }}.csr
+      -CA {{ pki_dir }}/ca.crt -CAkey {{ pki_dir }}/ca.key -CAcreateserial
+      -out {{ pki_dir }}/{{ cert.name }}.crt
+      -extensions SAN -extfile {{ pki_dir }}/{{ cert.name }}-openssl.cnf
+      -days 3650
+      {% else %}
+      openssl x509 -req -in {{ pki_dir }}/{{ cert.name }}.csr
+      -CA {{ pki_dir }}/ca.crt -CAkey {{ pki_dir }}/ca.key -CAcreateserial
+      -out {{ pki_dir }}/{{ cert.name }}.crt
+      -days 3650
+      {% endif %}
+  args:
+    creates: "{{ pki_dir }}/{{ cert.name }}.crt"
+
+#  5 Phân quyền file
+- name: Phân quyền file key và cert cho {{ cert.name }}
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: "{{ '0640' if item.endswith('.key') else '0644' }}"
+  loop:
+    - "{{ pki_dir }}/{{ cert.name }}.key"
+    - "{{ pki_dir }}/{{ cert.name }}.crt"

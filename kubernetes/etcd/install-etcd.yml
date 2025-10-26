@@ -1,0 +1,203 @@
+- name: Cài đặt và cấu hình cụm ETCD có TLS (multi-node)
+  hosts: etcd
+  become: yes
+  vars:
+    etcd_version: "v3.5.23"
+    etcd_user: "etcd"
+    etcd_group: "etcd"
+    etcd_install_dir: "/usr/local/bin"
+    etcd_data_dir: "/var/lib/etcd"
+    etcd_conf_dir: "/etc/etcd"
+    pki_dir: "{{ etcd_conf_dir }}/pki"
+
+    etcd_name: "{{ inventory_hostname }}"
+    node_ip: "{{ ansible_host }}"
+
+    # Tạo danh sách cluster động cho tất cả node etcd
+    initial_cluster: >-
+      {% for host in groups['etcd'] -%}
+      {{ host }}=https://{{ hostvars[host]['ansible_host'] }}:2380{% if not loop.last %},{% endif %}
+      {%- endfor %}
+
+    etcd_endpoints: >-
+      {% for host in groups['etcd'] -%}
+      https://{{ hostvars[host]['ansible_host'] }}:2379{% if not loop.last %},{% endif %}
+      {%- endfor %}
+
+    # Cấu hình URL lắng nghe và quảng bá
+    listen_peer_urls: "https://{{ node_ip }}:2380"
+    listen_client_urls: "https://{{ node_ip }}:2379,https://127.0.0.1:2379"
+    advertise_client_urls: "https://{{ node_ip }}:2379"
+    initial_advertise_peer_urls: "https://{{ node_ip }}:2380"
+
+  tasks:
+    # ------------------------------------------------------------
+    # 1. Chuẩn bị môi trường
+    # ------------------------------------------------------------
+    - name: Tạo user hệ thống cho ETCD
+      ansible.builtin.user:
+        name: "{{ etcd_user }}"
+        system: yes
+        shell: /sbin/nologin
+
+    - name: Tạo thư mục cần thiết cho ETCD và PKI
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ etcd_user }}"
+        group: "{{ etcd_group }}"
+        mode: "0755"
+      loop:
+        - "{{ etcd_data_dir }}"
+        - "{{ etcd_conf_dir }}"
+        - "{{ pki_dir }}"
+
+    # ------------------------------------------------------------
+    # 2. Tạo chứng chỉ CA (chỉ node đầu tiên)
+    # ------------------------------------------------------------
+    - name: Sinh khóa CA (chỉ trên node đầu tiên)
+      ansible.builtin.command: openssl genrsa -out {{ pki_dir }}/ca.key 4096
+      args:
+        creates: "{{ pki_dir }}/ca.key"
+      when: inventory_hostname == groups['etcd'][0]
+
+    - name: Sinh chứng chỉ CA (chỉ trên node đầu tiên)
+      ansible.builtin.command: >
+        openssl req -x509 -new -nodes -key {{ pki_dir }}/ca.key
+        -subj "/CN=etcd-ca" -days 3650 -out {{ pki_dir }}/ca.crt
+      args:
+        creates: "{{ pki_dir }}/ca.crt"
+      when: inventory_hostname == groups['etcd'][0]
+
+    - name: Tải CA cert/key về local từ node đầu tiên
+      ansible.builtin.fetch:
+        src: "{{ item }}"
+        dest: "./pki/"
+        flat: yes
+      loop:
+        - "{{ pki_dir }}/ca.crt"
+        - "{{ pki_dir }}/ca.key"
+      when: inventory_hostname == groups['etcd'][0]
+
+    - name: Phân phối CA cert/key đến các node khác
+      ansible.builtin.copy:
+        src: "./pki/{{ item }}"
+        dest: "{{ pki_dir }}/{{ item }}"
+        owner: "{{ etcd_user }}"
+        group: "{{ etcd_group }}"
+        mode: "0600"
+      loop:
+        - ca.crt
+        - ca.key
+      when: inventory_hostname != groups['etcd'][0]
+
+    # ------------------------------------------------------------
+    # 3. Sinh chứng chỉ server và client ETCD
+    # ------------------------------------------------------------
+    - name: Sinh chứng chỉ server và client ETCD
+      include_tasks: tasks/generate_cert.yml
+      loop:
+        - { name: "server", cn: "{{ etcd_name }}", san: "IP:{{ node_ip }},DNS:{{ etcd_name }}" }
+        - { name: "client", cn: "etcd-client" }
+      loop_control:
+        loop_var: cert
+
+    # ------------------------------------------------------------
+    # 4. Cài đặt ETCD
+    # ------------------------------------------------------------
+    - name: Tải gói cài đặt ETCD
+      ansible.builtin.get_url:
+        url: "https://github.com/etcd-io/etcd/releases/download/{{ etcd_version }}/etcd-{{ etcd_version }}-linux-amd64.tar.gz"
+        dest: "/tmp/etcd-{{ etcd_version }}.tar.gz"
+
+    - name: Giải nén gói ETCD
+      ansible.builtin.unarchive:
+        src: "/tmp/etcd-{{ etcd_version }}.tar.gz"
+        dest: "/tmp"
+        remote_src: yes
+
+    - name: Cài đặt binary etcd và etcdctl
+      ansible.builtin.copy:
+        src: "/tmp/etcd-{{ etcd_version }}-linux-amd64/{{ item }}"
+        dest: "{{ etcd_install_dir }}/{{ item }}"
+        mode: "0755"
+        remote_src: yes
+      loop:
+        - etcd
+        - etcdctl
+
+    # ------------------------------------------------------------
+    # 5. Cấu hình dịch vụ systemd
+    # ------------------------------------------------------------
+    - name: Tạo file systemd cho ETCD
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/etcd.service
+        content: |
+          [Unit]
+          Description=etcd key-value store
+          Documentation=https://etcd.io/docs/
+          After=network.target
+
+          [Service]
+          User={{ etcd_user }}
+          Type=notify
+          ExecStart={{ etcd_install_dir }}/etcd \
+            --name {{ etcd_name }} \
+            --data-dir {{ etcd_data_dir }} \
+            --listen-peer-urls {{ listen_peer_urls }} \
+            --listen-client-urls {{ listen_client_urls }} \
+            --advertise-client-urls {{ advertise_client_urls }} \
+            --initial-advertise-peer-urls {{ initial_advertise_peer_urls }} \
+            --initial-cluster {{ initial_cluster }} \
+            --initial-cluster-state new \
+            --cert-file={{ pki_dir }}/server.crt \
+            --key-file={{ pki_dir }}/server.key \
+            --client-cert-auth=true \
+            --trusted-ca-file={{ pki_dir }}/ca.crt \
+            --peer-cert-file={{ pki_dir }}/server.crt \
+            --peer-key-file={{ pki_dir }}/server.key \
+            --peer-client-cert-auth=true \
+            --peer-trusted-ca-file={{ pki_dir }}/ca.crt
+          Restart=always
+          LimitNOFILE=40000
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd để nhận cấu hình mới
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Kích hoạt và khởi động dịch vụ ETCD
+      ansible.builtin.systemd:
+        name: etcd
+        enabled: yes
+        state: started
+
+    # ------------------------------------------------------------
+    # 6. Kiểm tra hoạt động cụm ETCD
+    # ------------------------------------------------------------
+    - name: Kiểm tra hoạt động cụm ETCD
+      include_tasks: tasks/verify_cluster.yml
+      when: inventory_hostname == groups['etcd'][0]
+
+    # ------------------------------------------------------------
+    # 7. Sinh chứng chỉ riêng cho kube-apiserver
+    # ------------------------------------------------------------
+    - name: Sinh chứng chỉ cho kube
+      include_tasks: tasks/generate_cert.yml
+      loop:
+        - { name: "kube-etcd-client", cn: "kube-etcd-client" }
+      loop_control:
+        loop_var: cert
+      when: inventory_hostname == groups['etcd'][0]
+
+    - name: Tải kube-etcd-client cert/key về local
+      ansible.builtin.fetch:
+        src: "{{ item }}"
+        dest: "./pki/"
+        flat: yes
+      loop:
+        - "{{ pki_dir }}/kube-etcd-client.crt"
+        - "{{ pki_dir }}/kube-etcd-client.key"
+      when: inventory_hostname == groups['etcd'][0]

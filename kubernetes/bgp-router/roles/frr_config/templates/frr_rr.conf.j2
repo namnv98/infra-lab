@@ -1,0 +1,20 @@
+!
+hostname {{ bgp_hostname }}
+!
+router bgp {{ bgp_asn }}
+  bgp router-id {{ router_id }}
+  no bgp ebgp-requires-policy
+
+{% for client in rr_clients %}
+  neighbor {{ client.ip }} remote-as {{ client.asn }}
+  neighbor {{ client.ip }} update-source {{ router_id }}
+  neighbor {{ client.ip }} route-reflector-client
+  neighbor {{ client.ip }} next-hop-self
+{% endfor %}
+
+  address-family ipv4 unicast
+    network {{ vip_address }}
+  exit-address-family
+!
+exit
+write memory

@@ -1,0 +1,57 @@
+- name: Cài đặt containerd offline
+  become: true
+  vars:
+    containerd_bin_dir: "/usr/local/bin"
+    containerd_tar: "containerd-linux-{{ arch }}.tar.gz"
+    containerd_service_file: "containerd.service"
+    runc_file: "runc.amd64"
+  block:
+
+    - name: Tạo thư mục cần thiết
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ containerd_bin_dir }}"
+        - /usr/lib/systemd/system
+        - /etc/containerd
+
+    - name: Giải nén containerd vào /usr/local từ setup
+      unarchive:
+        src: "/tmp/setup/{{ containerd_tar }}"
+        dest: "/usr/local"
+        remote_src: yes
+        mode: '0755'
+
+    - name: Copy runc binary từ setup
+      copy:
+        src: "/tmp/setup/{{ runc_file }}"
+        dest: "{{ containerd_bin_dir }}/runc"
+        mode: '0755'
+        remote_src: yes
+
+    - name: Tạo file config.toml nếu chưa có
+      shell: "{{ containerd_bin_dir }}/containerd config default > /etc/containerd/config.toml"
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Bật SystemdCgroup = true trong config.toml
+      lineinfile:
+        path: /etc/containerd/config.toml
+        insertafter: '^\[plugins."io.containerd.grpc.v1.cri"\.containerd\.runtimes\.runc\]'
+        line: '    SystemdCgroup = true'
+
+    - name: Copy containerd service unit từ setup
+      copy:
+        src: "/tmp/setup/{{ containerd_service_file }}"
+        dest: /usr/lib/systemd/system/containerd.service
+        mode: '0644'
+        remote_src: yes
+
+    - name: Kích hoạt và khởi động containerd
+      systemd:
+        name: containerd
+        enabled: true
+        state: started
+        daemon_reload: true

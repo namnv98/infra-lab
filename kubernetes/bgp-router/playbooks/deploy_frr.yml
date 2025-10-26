@@ -1,0 +1,6 @@
+- name: Triển khai cấu hình FRRouting
+  hosts: route-reflectors:masters
+  become: true
+  roles:
+    - frr_install
+    - frr_config

@@ -1,0 +1,1 @@
+ssh-keygen -t ed25519 -C "namnv98@outlook.com.vn"

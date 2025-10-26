@@ -1,0 +1,62 @@
+# ============================================================
+# ROLE: kubelet → set-node-ip.yml
+# Mục đích:
+#   Đảm bảo kubelet nhận đúng IP thực tế của node, tránh tình trạng node join cluster
+#   với IP sai (ví dụ: 127.0.1.1, 10.0.2.15 hoặc IP NAT bridge của hypervisor).
+#
+# Khi nào cần chạy:
+#   - Khi node có nhiều NIC (eth0, eth1, ens18, ens19, ...).
+#   - Khi kubelet báo sai InternalIP trong `kubectl get nodes -o wide`.
+#   - Khi dùng cloud image, hoặc DHCP/VirtualBox NAT.
+#
+# Khi nào KHÔNG cần:
+#   - Nếu node chỉ có một interface mạng thật và kubelet tự detect đúng IP.
+#   - Nếu dùng kubeadm + config file YAML có `nodeRegistration.kubeletExtraArgs.node-ip`.
+# ============================================================
+
+- name: Lấy địa chỉ IP IPv4 "thực" của node, lấy IP đầu tiên
+  become: true
+  shell: |
+    ip -4 -o addr show | grep -v ' lo ' | awk '{print $4}' | cut -d/ -f1 | grep -vE '^10\.0\.2\.' | head -n1
+  register: node_ip_result
+  changed_when: false
+  failed_when: node_ip_result.stdout == ""
+  # Giải thích:
+  # - Lấy danh sách tất cả IPv4 hiện có trên node.
+  # - Loại bỏ interface “lo” (loopback).
+  # - Loại trừ IP trong dải 10.0.2.x (thường là NAT trong VirtualBox).
+  # - Lấy IP đầu tiên còn lại, thường là IP của NIC chính (ens18/eth0).
+  # Kết quả: node_ip_result.stdout chứa IP mà ta muốn kubelet sử dụng.
+
+- name: Lấy danh sách EnvironmentFile của kubelet
+  become: true
+  shell: systemctl cat kubelet | grep -Po '(?<=EnvironmentFile=-)[^\s]+'
+  register: kubelet_envfile_result
+  changed_when: false
+
+- name: Chọn file phù hợp để ghi --node-ip (ưu tiên /etc/sysconfig/kubelet)
+  set_fact:
+    kubelet_env_file: >-
+      {{ kubelet_envfile_result.stdout_lines
+         | select('search', '/etc/sysconfig/kubelet')
+         | list | first
+         if kubelet_envfile_result.stdout_lines
+         | select('search', '/etc/sysconfig/kubelet')
+         | list | length > 0
+         else '/etc/sysconfig/kubelet' }}
+
+- name: Ghi dòng cấu hình --node-ip vào {{ kubelet_env_file }}
+  become: true
+  lineinfile:
+    path: "{{ kubelet_env_file }}"
+    regexp: '^KUBELET_EXTRA_ARGS='
+    line: "KUBELET_EXTRA_ARGS=--node-ip={{ node_ip_result.stdout }}"
+    create: yes
+    mode: '0644'
+
+- name: Reload systemd và restart kubelet
+  become: true
+  systemd:
+    name: kubelet
+    daemon_reload: true
+    state: restarted

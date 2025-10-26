@@ -1,0 +1,51 @@
+---
+# verify_cluster.yml
+# Kiểm tra tình trạng cụm ETCD có TLS
+
+- name: Kiểm tra danh sách thành viên
+  ansible.builtin.command:
+    cmd: >
+      {{ etcd_install_dir }}/etcdctl
+      --endpoints={{ etcd_endpoints }}
+      --cacert={{ pki_dir }}/ca.crt
+      --cert={{ pki_dir }}/client.crt
+      --key={{ pki_dir }}/client.key
+      member list -w table
+  register: member_list
+  changed_when: false
+
+- name: Hiển thị danh sách thành viên
+  ansible.builtin.debug:
+    var: member_list.stdout
+
+- name: Kiểm tra trạng thái endpoint
+  ansible.builtin.command:
+    cmd: >
+      {{ etcd_install_dir }}/etcdctl
+      --endpoints={{ etcd_endpoints }}
+      --cacert={{ pki_dir }}/ca.crt
+      --cert={{ pki_dir }}/client.crt
+      --key={{ pki_dir }}/client.key
+      endpoint status -w table
+  register: endpoint_status
+  changed_when: false
+
+- name: Hiển thị endpoint status
+  ansible.builtin.debug:
+    var: endpoint_status.stdout
+
+- name: Kiểm tra health cluster
+  ansible.builtin.command:
+    cmd: >
+      {{ etcd_install_dir }}/etcdctl
+      --endpoints={{ etcd_endpoints }}
+      --cacert={{ pki_dir }}/ca.crt
+      --cert={{ pki_dir }}/client.crt
+      --key={{ pki_dir }}/client.key
+      endpoint health -w table
+  register: endpoint_health
+  changed_when: false
+
+- name: Hiển thị kết quả kiểm tra health
+  ansible.builtin.debug:
+    var: endpoint_health.stdout

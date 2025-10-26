@@ -1,0 +1,76 @@
+- name: Create .kube directory for user
+  file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0755'
+
+- name: Copy admin.conf to user kubeconfig
+  copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: '0644'
+
+- name: Fetch Kubernetes files to local machine
+  fetch:
+    src: "{{ item }}"
+    dest: ./kubeadm-output/
+    flat: yes
+  loop:
+    - /etc/kubernetes/admin.conf
+
+- name: Fetch admin.conf về local máy điều khiển
+  fetch:
+    src: /etc/kubernetes/admin.conf
+    dest: /home/namnv/kubectx/clusters/my-cluster.yaml
+    flat: yes
+  delegate_to: master1
+  run_once: true
+
+
+- name: Tạo token join command cho worker
+  command: kubeadm token create --print-join-command
+  register: join_worker_result
+
+#- name: Upload lại certs để lấy certificate key (cho master join)
+#  command: kubeadm init phase upload-certs --upload-certs --config /root/kubeadm-config.yaml
+#  register: upload_certs_result
+
+- name: Upload lại certs để lấy certificate key (cho master join)
+  command: kubeadm init phase upload-certs --upload-certs
+  register: upload_certs_result
+
+- name: Extract certificate key
+  set_fact:
+    certificate_key: "{{ upload_certs_result.stdout_lines | select('match', '^[0-9a-f]{64}$') | list | first }}"
+
+- name: Ghi join script cho worker
+  copy:
+    dest: /tmp/join_worker.sh.j2
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      {{ join_worker_result.stdout }} --apiserver-advertise-address={% raw %}{{ apiserver_advertise_address }}{% endraw %} --discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=all --cri-socket {{ cri_socket }}
+
+- name: Ghi join script cho master
+  copy:
+    dest: /tmp/join_master.sh.j2
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      {{ join_worker_result.stdout }} --apiserver-advertise-address={% raw %}{{ apiserver_advertise_address }}{% endraw %} --control-plane --certificate-key {{ certificate_key }} --discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=all --cri-socket {{ cri_socket }}
+
+- name: Fetch về local folder kubeadm-output/
+  fetch:
+    src: "{{ item }}"
+    dest: ./kubeadm-output/
+    flat: yes
+  loop:
+    - /tmp/join_worker.sh.j2
+    - /tmp/join_master.sh.j2
+    - /etc/kubernetes/admin.conf
+    - /etc/kubernetes/manifests/kube-vip.yaml

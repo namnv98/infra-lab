@@ -1,0 +1,18 @@
+hostname {{ inventory_hostname | upper }}
+!
+router bgp {{ bgp_asn }}
+  bgp router-id {{ router_id }}
+  no bgp ebgp-requires-policy
+
+  # Peer route-reflector
+  neighbor {{ neighbor_ip }} remote-as {{ neighbor_as }}
+  neighbor {{ neighbor_ip }} update-source {{ router_id }}
+  neighbor {{ neighbor_ip }} route-reflector-client
+  neighbor {{ neighbor_ip }} next-hop-self
+
+  address-family ipv4 unicast
+    # Client không advertise VIP, chỉ nhận từ RR
+  exit-address-family
+!
+exit
+write memory

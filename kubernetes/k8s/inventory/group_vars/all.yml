@@ -1,0 +1,41 @@
+# ---------------------------
+# Mapping kiến trúc CPU của node sang tên binary Kubernetes/CRI tương ứng
+# Ví dụ ansible_architecture = x86_64 → Kubernetes dùng amd64
+# ---------------------------
+arch_map:
+  x86_64: amd64
+  aarch64: arm64
+  armv7l: arm
+
+# Arch hiện tại của node (sử dụng mapping nếu có, fallback là ansible_architecture)
+arch: "{{ arch_map[ansible_architecture] | default(ansible_architecture) }}"
+
+# ---------------------------
+# Pod network CIDR
+# Đây là dải IP mà CNI plugin (Calico/Flannel) dùng để cấp IP cho Pod
+# ---------------------------
+pod_network_cidr: "172.16.1.0/16"
+
+# ---------------------------
+# IP mà kube-apiserver sẽ lắng nghe
+# Nếu node có nhiều NIC, chọn IP thật của NIC chính
+# Trên cloud như GCP/AWS thì nên dùng Internal IP
+# ---------------------------
+apiserver_advertise_address: "{{ ansible_host }}"
+vip_address: "10.10.0.100"
+
+# ---------------------------
+# SANs (Subject Alternative Names) cho chứng chỉ kube-apiserver
+# Bao gồm IP hoặc DNS mà client (kubectl, kubelet, API server) sẽ kết nối
+# Thêm external IP nếu cần truy cập từ ngoài cluster
+# ---------------------------
+apiserver_cert_sans:
+  - "{{ apiserver_advertise_address }}"
+  - "127.0.0.1"
+  - "{{ vip_address }}"
+
+# ---------------------------
+# Container runtime socket
+# ---------------------------
+cri_socket: "unix:///run/containerd/containerd.sock"
+

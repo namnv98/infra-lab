@@ -1,0 +1,30 @@
+---
+- name: Install dependencies for repo setup
+  apt:
+    name:
+      - curl
+      - gnupg2
+    state: present
+    update_cache: yes
+
+- name: Add FRRouting GPG key
+  apt_key:
+    url: https://deb.frrouting.org/frr/keys.asc
+    state: present
+
+- name: Add FRRouting APT repository
+  shell: |
+    . /etc/os-release && echo "deb https://deb.frrouting.org/frr $VERSION_CODENAME frr-stable" > /etc/apt/sources.list.d/frr.list
+  args:
+    creates: /etc/apt/sources.list.d/frr.list
+
+- name: Update apt cache after adding FRR repo
+  apt:
+    update_cache: yes
+
+- name: Install FRRouting packages
+  apt:
+    name:
+      - frr
+      - frr-pythontools
+    state: present

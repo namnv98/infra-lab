@@ -1,0 +1,13 @@
+- name: Tạo câu lệnh join từ template
+  set_fact:
+    join_cmd: "{{ lookup('template', './kubeadm-output/join_worker.sh.j2') }}"
+  vars:
+    apiserver_advertise_address: "{{ hostvars[inventory_hostname]['ansible_host'] }}"
+
+- name: Hiển thị câu lệnh join (debug)
+  debug:
+    msg: "{{ join_cmd }}"
+
+- name: Join workers
+  become: true
+  shell: "{{ join_cmd }}"

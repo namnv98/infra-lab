@@ -1,0 +1,12 @@
+- name: Create VM
+  shell: |
+    source {{ project_rc_file }} {{ project_user }} {{ project_name }}
+    openstack server create \
+      --flavor {{ flavor_name }} \
+      --image {{ image_name }} \
+      --nic net-id=$(openstack network show -f value -c id {{ net_name }}) \
+      --key-name {{ key_name }} \
+      {{ vm_name }}
+  args:
+    executable: /bin/bash
+  ignore_errors: true

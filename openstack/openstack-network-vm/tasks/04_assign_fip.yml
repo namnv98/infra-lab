@@ -1,0 +1,20 @@
+- name: Allocate floating IP
+  shell: |
+    source {{ project_rc_file }} {{ project_user }} {{ project_name }}
+    openstack floating ip create {{ net_name }} -f value -c floating_ip_address
+  register: floating_ip_result
+  args:
+    executable: /bin/bash
+  ignore_errors: true
+
+- name: Attach floating IP to VM
+  shell: |
+    source {{ project_rc_file }} {{ project_user }} {{ project_name }}
+    openstack server add floating ip {{ vm_name }} {{ floating_ip_result.stdout }}
+  args:
+    executable: /bin/bash
+  ignore_errors: true
+
+- name: Show Floating IP assigned
+  debug:
+    msg: "VM {{ vm_name }} được gán Floating IP: {{ floating_ip_result.stdout }}"

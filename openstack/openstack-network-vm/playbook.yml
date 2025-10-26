@@ -1,0 +1,36 @@
+- name: Setup OpenStack network & VM with Floating IP (via shell)
+  hosts: devstack
+  become: true
+
+  vars:
+    project_rc_file: /opt/stack/devstack/openrc
+    project_user: admin
+    project_name: admin
+
+    net_name: internal-net
+    subnet_name: my-subnet
+    subnet_cidr: 10.10.0.0/24
+    router_name: my-router
+
+    image_name: debian-12
+    flavor_name: m1.small
+    key_name: mykey
+    vm_name: my-vm
+
+    external_net: public
+
+  tasks:
+    - name: Include network creation task
+      include_tasks: tasks/01_create_network.yml
+
+    - name: Include router creation task
+      include_tasks: tasks/02_create_router.yml
+
+#    - name: Include VM creation task
+#      include_tasks: tasks/03_create_vm.yml
+#
+#    - name: Include floating IP assignment task
+#      include_tasks: tasks/04_assign_fip.yml
+#
+#    - name: Include security group open ports task
+#      include_tasks: tasks/05_open_ports.yml

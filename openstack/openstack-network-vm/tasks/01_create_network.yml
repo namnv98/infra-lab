@@ -1,0 +1,18 @@
+- name: Create internal network
+  shell: |
+    source {{ project_rc_file }} {{ project_user }} {{ project_name }}
+    openstack network create {{ net_name }}
+  args:
+    executable: /bin/bash
+  ignore_errors: true
+
+- name: Create subnet
+  shell: |
+    source {{ project_rc_file }} {{ project_user }} {{ project_name }}
+    openstack subnet create --network {{ net_name }} \
+      --subnet-range {{ subnet_cidr }} \
+      --dns-nameserver 8.8.8.8 \
+      {{ subnet_name }}
+  args:
+    executable: /bin/bash
+  ignore_errors: true

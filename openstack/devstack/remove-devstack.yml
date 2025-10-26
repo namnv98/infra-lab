@@ -1,0 +1,104 @@
+- name: Gỡ hoàn toàn DevStack khỏi hệ thống Ubuntu
+  hosts: devstack
+  become: true
+
+  vars:
+    devstack_user: stack
+    devstack_home: "/opt/{{ devstack_user }}"
+
+  tasks:
+
+    - name: Dừng tất cả process của user stack
+      shell: |
+        pkill -u {{ devstack_user }} || true
+      ignore_errors: true
+
+
+    - name: Kill etcd
+      shell: pgrep etcd | xargs -r kill -9
+      ignore_errors: true
+
+    - name: Kill process giữ /opt/stack/etcd
+      shell: fuser -km /opt/stack/etcd || true
+      ignore_errors: true
+
+    - name: Unmount tất cả /opt/stack/data/etcd nếu đang bị mount
+      shell: |
+        while mountpoint -q /opt/stack/data/etcd; do
+          umount -lf /opt/stack/data/etcd || true
+          sleep 1
+        done
+      ignore_errors: true
+
+    - name: Xóa thư mục DevStack, requirements và dữ liệu liên quan
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ devstack_home }}/devstack"
+        - "{{ devstack_home }}/requirements"
+        - "/etc/sudoers.d/{{ devstack_user }}"
+        - "/etc/systemd/system/devstack@*"
+        - "/var/log/{{ devstack_user }}"
+        - "/opt/stack"
+        - "/opt/{{ devstack_user }}"
+        - "/opt/stack/logs"
+
+    - name: Xóa user stack và home
+      user:
+        name: "{{ devstack_user }}"
+        state: absent
+        remove: true
+      ignore_errors: true
+
+    - name: Xóa container Docker (nếu có)
+      shell: |
+        docker ps -aq | xargs -r docker rm -f
+      ignore_errors: true
+
+    - name: Xóa Docker network (nếu có)
+      shell: |
+        docker network ls -q | xargs -r docker network rm
+      ignore_errors: true
+
+    - name: Xóa các bridge OVS (nếu có)
+      shell: |
+        ovs-vsctl list-br | xargs -r -n1 ovs-vsctl del-br
+      ignore_errors: true
+
+    - name: Xóa các interface ảo còn tồn tại (tap/qvo/qbr...)
+      shell: |
+        ip link show | grep -E 'tap|qvo|qbr|qr-|fg-' | awk -F: '{print $2}' | xargs -r -n1 ip link delete
+      ignore_errors: true
+
+    - name: Dọn dẹp VM và network libvirt (nếu có)
+      shell: |
+        virsh list --all --name | xargs -r -n1 virsh destroy
+        virsh list --all --name | xargs -r -n1 virsh undefine
+        virsh net-list --all --name | xargs -r -n1 virsh net-destroy
+        virsh net-list --all --name | xargs -r -n1 virsh net-undefine
+      ignore_errors: true
+
+    - name: Reset iptables về mặc định
+      shell: |
+        iptables -F
+        iptables -t nat -F
+        iptables -X
+      ignore_errors: true
+
+    - name: Reload lại systemd để xóa cache các service đã xóa
+      shell: |
+        systemctl daemon-reexec
+        systemctl daemon-reload
+
+    - name: Gỡ bỏ các gói có thể do DevStack cài thêm
+      apt:
+        name:
+          - mariadb-server
+          - rabbitmq-server
+          - etcd
+          - openvswitch-switch
+          - docker.io
+        state: absent
+        purge: true
+        autoremove: true

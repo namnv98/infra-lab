@@ -1,0 +1,23 @@
+- name: Create router
+  shell: |
+    source {{ project_rc_file }} {{ project_user }} {{ project_name }}
+    openstack router create {{ router_name }}
+  args:
+    executable: /bin/bash
+  ignore_errors: true
+
+- name: Set router external gateway
+  shell: |
+    source {{ project_rc_file }} {{ project_user }} {{ project_name }}
+    openstack router set {{ router_name }} --external-gateway {{ external_net }}
+  args:
+    executable: /bin/bash
+  ignore_errors: true
+
+- name: Attach subnet to router
+  shell: |
+    source {{ project_rc_file }} {{ project_user }} {{ project_name }}
+    openstack router add subnet {{ router_name }} {{ subnet_name }}
+  args:
+    executable: /bin/bash
+  ignore_errors: true

@@ -1,0 +1,51 @@
+- name: Prepare all nodes (common setup, container runtime, kube)
+  hosts: all
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+  roles:
+    - 01_common
+    - 02_containerd
+    - 03_install_k8s
+    - 04_set_node_ip
+    - kube_vip
+
+- name: Initialize only primary master
+  hosts: master
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+  tasks:
+    - name: Init master (bootstrap only)
+      include_role:
+        name: 05_init_master
+      when: hostvars[inventory_hostname].bootstrap | default(false)
+
+    - name: Setup CNI (bootstrap only)
+      include_role:
+        name: 06_network
+      when: hostvars[inventory_hostname].bootstrap | default(false)
+
+    - name: Gen join file (bootstrap only)
+      include_role:
+        name: 07_gen_file
+      when: hostvars[inventory_hostname].bootstrap | default(false)
+
+- name: Join other control-plane masters
+  hosts: master
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+  tasks:
+    - name: Join control-plane
+      include_role:
+        name: 08_join_master
+      when: not hostvars[inventory_hostname].bootstrap | default(false)
+
+- name: Join all workers
+  hosts: worker
+  become: true
+  vars_files:
+    - ../group_vars/all.yml
+  roles:
+    - 09_join_worker

@@ -1,0 +1,77 @@
+- name: Cài đặt Kubernetes binaries
+  become: true
+  vars:
+    kube_bin_dir: /usr/local/bin
+    cni_bin_dir: /opt/cni/bin
+    kubelet_systemd_dir: /usr/lib/systemd/system/kubelet.service.d
+    kube_binaries: [ kubeadm, kubelet, kubectl ]
+    setup_dir: /tmp/setup
+  block:
+
+    - name: Tạo thư mục cần thiết cho Kubernetes và CNI
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ cni_bin_dir }}"
+        - "{{ kube_bin_dir }}"
+        - "{{ kubelet_systemd_dir }}"
+
+    - name: Giải nén CNI plugin vào {{ cni_bin_dir }}
+      unarchive:
+        src: "{{ setup_dir }}/cni-plugins-linux-{{ arch }}.tgz"
+        dest: "{{ cni_bin_dir }}"
+        remote_src: yes
+        mode: '0755'
+
+    - name: Giải nén crictl vào {{ kube_bin_dir }} (tùy chọn, dùng để debug container/pod không bắt buộc phải cài)
+      unarchive:
+        src: "{{ setup_dir }}/crictl-linux-{{ arch }}.tar.gz"
+        dest: "{{ kube_bin_dir }}"
+        remote_src: yes
+        mode: '0755'
+
+    - name: Copy binary Kubernetes (kubeadm, kubelet, kubectl) vào {{ kube_bin_dir }}
+      copy:
+        src: "{{ setup_dir }}/{{ item }}"
+        dest: "{{ kube_bin_dir }}/{{ item }}"
+        mode: '0755'
+        remote_src: yes
+      loop: "{{ kube_binaries }}"
+
+    - name: Triển khai kubelet.service từ offline setup
+      copy:
+        src: "{{ setup_dir }}/kubelet.service"
+        dest: /usr/lib/systemd/system/kubelet.service
+        mode: '0644'
+        remote_src: yes
+
+    - name: Thay tất cả /usr/bin bằng {{ kube_bin_dir }} trong kubelet.service
+      replace:
+        path: /usr/lib/systemd/system/kubelet.service
+        regexp: '/usr/bin'
+        replace: "{{ kube_bin_dir }}"
+
+    - name: Triển khai drop-in config 10-kubeadm.conf cho kubelet
+      copy:
+        src: "{{ setup_dir }}/10-kubeadm.conf"
+        dest: /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+        mode: '0644'
+        remote_src: yes
+
+    - name: Thay tất cả /usr/bin bằng {{ kube_bin_dir }} trong 10-kubeadm.conf
+      replace:
+        path: /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+        regexp: '/usr/bin'
+        replace: "{{ kube_bin_dir }}"
+
+    - name: Reload systemd và bật kubelet service
+      systemd:
+        daemon_reload: yes
+        name: kubelet
+        enabled: yes
+        state: started
+
+    - name: Pre-pull kubeadm images
+      command: kubeadm config images pull

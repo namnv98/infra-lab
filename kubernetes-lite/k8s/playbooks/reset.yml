@@ -1,0 +1,5 @@
+- name: Reset Kubernetes cluster
+  hosts: all
+  become: true
+  roles:
+    - reset_cluster

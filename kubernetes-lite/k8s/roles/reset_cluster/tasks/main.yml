@@ -1,0 +1,71 @@
+---
+# roles/k8s-reset-containerd/tasks/main.yml
+- name: Stop kubelet and containerd services
+  become: true
+  service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: no
+  loop:
+    - kubelet
+    - containerd
+
+- name: Reset kubeadm and flush iptables
+  become: true
+  shell: |
+    kubeadm reset -f
+    # Flush iptables
+    iptables -F
+    iptables -t nat -F
+    iptables -t mangle -F
+    iptables -X
+    # Remove leftover CNI interfaces
+    ip link set cni0 down || true
+    ip link set flannel.1 down || true
+    ip link delete cni0 || true
+    ip link delete flannel.1 || true
+  args:
+    executable: /bin/bash
+
+- name: Kill leftover kube processes
+  become: true
+  shell: |
+    pids=$(pgrep -f 'kube|etcd|containerd-shim') || true
+    if [ -n "$pids" ]; then
+      kill -9 $pids || true
+    fi
+  args:
+    executable: /bin/bash
+  ignore_errors: yes
+
+- name: Remove Kubernetes, etcd, CNI, kubelet, containerd data, logs, runtime
+  become: true
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/kubernetes
+    - /var/lib/etcd
+    - /etc/cni/net.d
+    - /var/lib/cni
+    - /var/lib/kubelet
+    - /root/.kube
+    - /var/log/pods
+    - /var/run/kubernetes
+    - /var/run/kubelet
+    - /run/flannel
+    - /var/lib/containerd
+    - /run/containerd
+    - /usr/lib/systemd/system/kubelet.service.d
+
+- name: Reload systemd daemon
+  become: true
+  systemd:
+    daemon_reload: yes
+
+- name: Start containerd service
+  become: true
+  service:
+    name: containerd
+    state: started
+    enabled: yes

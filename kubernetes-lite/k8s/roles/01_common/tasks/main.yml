@@ -1,0 +1,37 @@
+- name: Disable all active swap
+  command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: Comment out swap entries in /etc/fstab
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\s+swap\s+)'
+    replace: '# \1'
+
+- name: Ensure br_netfilter module is loaded
+  modprobe:
+    name: br_netfilter
+    state: present
+
+- name: Ensure sysctl settings for Kubernetes networking
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+  loop:
+    - { key: net.bridge.bridge-nf-call-iptables, value: 1 }
+    - { key: net.ipv4.ip_forward, value: 1 }
+    - { key: net.bridge.bridge-nf-call-ip6tables, value: 1 }
+- name: Ensure curl and gnupg are installed
+  apt:
+    name:
+      - curl
+      - podman
+    state: present
+    update_cache: yes
+- name: Copy thư mục setup lên node
+  copy:
+    src: "{{ playbook_dir }}/../setup/"
+    dest: /tmp/setup/
+    mode: '0755'

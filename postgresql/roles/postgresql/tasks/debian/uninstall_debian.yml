@@ -1,0 +1,43 @@
+
+- name: Stop and disable PostgreSQL service (ignore if missing)
+  service:
+    name: postgresql@15-main
+    state: stopped
+    enabled: no
+  failed_when: false
+  ignore_errors: yes
+
+- name: Remove PostgreSQL packages
+  apt:
+    name:
+      - postgresql-15
+      - postgresql-client-15
+      - postgresql-contrib-15
+      - postgresql-server-dev-15
+    state: absent
+    purge: yes
+
+- name: Remove config and data directories
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/postgresql/15
+    - /var/lib/postgresql/15
+    - /var/log/postgresql
+
+- name: Remove repository
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/apt/sources.list.d/pgdg.list
+    - /usr/share/keyrings/postgresql.gpg
+
+- name: Update apt cache
+  apt:
+    update_cache: yes
+
+- name: Remove unused dependencies
+  apt:
+    autoremove: yes

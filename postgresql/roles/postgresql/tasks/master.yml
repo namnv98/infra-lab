@@ -1,0 +1,79 @@
+- name: Init DB
+  command: "{{ postgresql_bin_dir }}/postgresql-{{ postgresql_version }}-setup initdb"
+  args:
+    creates: "{{ postgresql_data_dir }}/PG_VERSION"
+  when: ansible_os_family == "RedHat"
+
+- name: Set permissions on data dir
+  file:
+    path: "{{ postgresql_data_dir }}"
+    owner: postgres
+    group: postgres
+    mode: "0700"
+    recurse: yes
+
+- name: Create basic pg_hba.conf
+  copy:
+    dest: "{{ postgresql_conf_dir }}/pg_hba.conf"
+    content: |
+      # TYPE  DATABASE  USER        ADDRESS             METHOD
+      local   all       postgres                         peer
+      local   all       all                              md5
+      host    all       all        0.0.0.0/0             md5
+      host    replication {{ replication_user }} {{ hostvars[groups['slave'][0]]['ansible_host'] }}/32 md5
+    owner: postgres
+    group: postgres
+    mode: "0600"
+
+- name: Configure postgresql.conf
+  blockinfile:
+    path: "{{ postgresql_conf_dir }}/postgresql.conf"
+    block: |
+      listen_addresses = '*'
+      port = {{ postgresql_port }}
+      max_connections = 100
+      shared_buffers = 128MB
+      wal_level = replica
+      max_wal_senders = 3
+      wal_keep_size = 512MB
+      hot_standby = on
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - MASTER CONFIG"
+  tags:
+    - configure
+
+- name: Start PostgreSQL
+  systemd:
+    name: "postgresql-{{ postgresql_version }}"
+    state: started
+    enabled: yes
+  when: ansible_os_family == "RedHat"
+
+- name: Start PostgreSQL
+  become: yes
+  service:
+    name: postgresql
+    state: started
+  register: pg_status
+  when: ansible_os_family == "Debian"
+
+- name: Wait for PostgreSQL ready
+  wait_for:
+    port: "{{ postgresql_port }}"
+    delay: 5
+    timeout: 30
+
+- name: Create replication user
+  become: yes
+  command: |
+    sudo -u postgres psql -c "CREATE ROLE {{ replication_user }} WITH REPLICATION LOGIN PASSWORD '{{ replication_password }}'"
+
+- name: Set postgres admin password
+  become: yes
+  command: |
+    sudo -u postgres psql -c "ALTER USER postgres WITH ENCRYPTED PASSWORD '{{ admin_password }}'"
+
+- name: Restart PostgreSQL with final config
+  become: yes
+  systemd:
+    name: "{{ postgresql_service_name }}"
+    state: restarted

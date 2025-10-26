@@ -1,0 +1,85 @@
+- name: Đợi Kafka khởi động (lắng nghe port 9092)
+  ansible.builtin.wait_for:
+    port: 9092
+    host: "localhost"
+    timeout: 60
+    state: started
+
+- name: Thêm user_namnv98 vào block KafkaServer
+  replace:
+    path: "{{ kafka_install_dir }}/config/kafka_server_jaas.conf"
+    regexp: '(KafkaServer\s*\{[^}]*)(user_\w+="[^"]+");(\s*)\n\s*\}'
+    replace: '\1\2\n  user_namnv98="namnv98";\n}'
+    backup: yes
+    owner: kafka
+    group: kafka
+    mode: '0640'
+
+- name: Phân quyền Kafka ACL cho user namnv98 (Read/Write topic "my-topic-*")
+  ansible.builtin.shell: |
+    {{ kafka_install_dir }}/bin/kafka-acls.sh \
+      --bootstrap-server localhost:9092 \
+      --add \
+      --allow-principal User:namnv98 \
+      --operation Read \
+      --operation Write \
+      --operation Describe \
+      --operation Create \
+      --topic my-topic \
+      --resource-pattern-type prefixed \
+      --command-config {{ kafka_install_dir }}/config/client.properties
+  args:
+    executable: /bin/bash
+  become: true
+
+- name: Phân quyền Kafka ACL cho user namnv98 (Consumer Groups "my-group-*")
+  ansible.builtin.shell: |
+    {{ kafka_install_dir }}/bin/kafka-acls.sh \
+      --bootstrap-server localhost:9092 \
+      --add \
+      --allow-principal User:namnv98 \
+      --operation Read \
+      --operation Delete \
+      --operation Describe \
+      --group my-group \
+      --resource-pattern-type prefixed \
+      --command-config {{ kafka_install_dir }}/config/client.properties
+  args:
+    executable: /bin/bash
+  become: true
+
+- name: Phân quyền Kafka ACL cho user namnv98 (Cluster-level)
+  ansible.builtin.shell: |
+    {{ kafka_install_dir }}/bin/kafka-acls.sh \
+      --bootstrap-server localhost:9092 \
+      --add \
+      --allow-principal User:namnv98 \
+      --operation Describe \
+      --operation DescribeConfigs \
+      --cluster \
+      --command-config {{ kafka_install_dir }}/config/client.properties
+  args:
+    executable: /bin/bash
+  become: true
+
+- name: Phân quyền Kafka ACL cho user namnv98 (Transactional ID "my-tx-*")
+  ansible.builtin.shell: |
+    {{ kafka_install_dir }}/bin/kafka-acls.sh \
+      --bootstrap-server localhost:9092 \
+      --add \
+      --allow-principal User:namnv98 \
+      --operation Write \
+      --operation Describe \
+      --transactional-id my-tx \
+      --resource-pattern-type prefixed \
+      --command-config {{ kafka_install_dir }}/config/client.properties
+  args:
+    executable: /bin/bash
+  become: true
+
+- name: restart_kafka
+  become: yes
+  ansible.builtin.shell: |
+    systemctl restart kafka
+  args:
+    executable: /bin/bash

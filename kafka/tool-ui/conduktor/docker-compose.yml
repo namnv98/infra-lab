@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:latest
+    container_name: conduktor-postgres
+    environment:
+      POSTGRES_USER: conduktor
+      POSTGRES_PASSWORD: conduktor
+      POSTGRES_DB: conduktor
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U conduktor" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  conduktor:
+    image: conduktor/conduktor-console:latest
+    container_name: conduktor
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      CDK_DATABASE_URL: "jdbc:postgresql://conduktor:conduktor@postgres:5432/conduktor"
+
+      # Admin account
+      CDK_ADMIN_EMAIL: "admin@admin.com"
+      CDK_ADMIN_PASSWORD: "StrongP@ssword1!"
+
+volumes:
+  postgres_data:

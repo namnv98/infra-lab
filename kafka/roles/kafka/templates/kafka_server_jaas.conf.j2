@@ -1,0 +1,14 @@
+KafkaServer {
+  org.apache.kafka.common.security.plain.PlainLoginModule required
+  serviceName="kafka"
+  username="broker-admin"
+  password="secret"
+  user_admin="admin";
+};
+
+ControllerServer {
+  org.apache.kafka.common.security.plain.PlainLoginModule required
+  serviceName="kafka"
+  username="controller_user"
+  password="controller_secret";
+};

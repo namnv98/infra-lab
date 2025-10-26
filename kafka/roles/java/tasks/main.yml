@@ -1,0 +1,45 @@
+- name: Install Java 17
+  ansible.builtin.apt:
+    name:
+      - openjdk-17-jdk
+    state: present
+    update_cache: yes
+  become: true
+  tags:
+    - dependencies
+    - java_install
+
+- name: Find Java 17 install path on Debian
+  ansible.builtin.find:
+    paths: /usr/lib/jvm
+    patterns: 'java-17-openjdk*'
+    file_type: directory
+  register: java_dirs
+  tags:
+    - dependencies
+    - java_config
+
+- name: Configure Java alternatives on Debian
+  ansible.builtin.command: >
+    update-alternatives --install /usr/bin/java java {{ java_dirs.files[0].path }}/bin/java 20000
+  when:
+    - java_dirs.matched > 0
+  become: true
+  tags:
+    - dependencies
+    - java_config
+
+- name: Set JAVA_HOME fact on Debian
+  ansible.builtin.shell: readlink -f $(which java) | sed 's:/bin/java::'
+  register: java_home_path
+  changed_when: false
+  tags:
+    - dependencies
+    - java_home
+
+- name: Export JAVA_HOME fact on Debian
+  ansible.builtin.set_fact:
+    java_home: "{{ java_home_path.stdout }}"
+  tags:
+    - dependencies
+    - java_home

@@ -1,0 +1,30 @@
+[Unit]
+Description=Apache Kafka Server (KRaft Mode)
+After=network.target
+
+[Service]
+Type=simple
+User=kafka
+Group=kafka
+
+# Thiết lập JAVA_HOME để đảm bảo JVM hoạt động đúng
+Environment="JAVA_HOME={{ java_home }}"
+
+# Load JAAS config cho SASL authentication
+Environment="KAFKA_OPTS=-Djava.security.auth.login.config={{ kafka_install_dir }}/config/kafka_server_jaas.conf"
+
+WorkingDirectory={{ kafka_install_dir }}
+
+# Start và stop Kafka
+ExecStart={{ kafka_install_dir }}/bin/kafka-server-start.sh {{ kafka_install_dir }}/config/server.properties
+ExecStop={{ kafka_install_dir }}/bin/kafka-server-stop.sh
+
+# Tự động restart nếu Kafka bị crash
+Restart=on-failure
+RestartSec=5s
+
+# Tăng giới hạn số file mở để xử lý nhiều kết nối
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,38 @@
+port 1194
+proto udp
+dev tun
+
+ca /etc/openvpn/easy-rsa/pki/ca.crt
+cert /etc/openvpn/easy-rsa/pki/issued/server.crt
+key /etc/openvpn/easy-rsa/pki/private/server.key
+dh /etc/openvpn/easy-rsa/pki/dh.pem
+tls-crypt /etc/openvpn/tls-crypt.key
+
+server 10.8.0.0 255.255.255.0
+topology subnet
+client-to-client
+
+tun-mtu 1400
+mssfix 1360
+push "tun-mtu 1400"
+push "mssfix 1360"
+
+push "redirect-gateway def1 bypass-dhcp"
+push "dhcp-option DNS 1.1.1.1"
+push "dhcp-option DNS 8.8.8.8"
+
+keepalive 10 120
+persist-key
+persist-tun
+
+user nobody
+group nogroup
+
+auth-user-pass-verify /etc/openvpn/auth_script.sh via-file
+script-security 3
+username-as-common-name
+
+status /var/log/openvpn-status.log
+log-append /var/log/openvpn.log
+verb 3
+explicit-exit-notify 1

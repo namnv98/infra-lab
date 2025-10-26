@@ -1,0 +1,5 @@
+- name: Complete PostgreSQL 12 Master-Slave Setup
+  hosts: postgresql
+  become: yes
+  roles:
+    - postgresql

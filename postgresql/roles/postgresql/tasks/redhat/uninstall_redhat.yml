@@ -1,0 +1,40 @@
+# 1. Dừng dịch vụ PostgreSQL nếu đang chạy
+- name: Stop PostgreSQL service
+  ansible.builtin.service:
+    name: postgresql-15
+    state: stopped
+  ignore_errors: yes
+
+# 2. Gỡ cài đặt các gói PostgreSQL
+- name: Remove PostgreSQL server and client
+  ansible.builtin.yum:
+    name: "postgresql15-server,postgresql15"
+    state: absent
+  ignore_errors: yes
+
+# 3. Xóa dữ liệu và cấu hình (tuỳ chọn - CAUTION!)
+- name: Remove PostgreSQL data directory
+  ansible.builtin.file:
+    path: "/var/lib/pgsql/15"
+    state: absent
+  when: ansible_distribution_major_version | int >= 8
+  ignore_errors: yes
+
+- name: Remove PostgreSQL config files
+  ansible.builtin.file:
+    path: "/etc/postgresql/15"
+    state: absent
+  ignore_errors: yes
+
+# 4. Gỡ repo PGDG
+- name: Remove PGDG repo
+  ansible.builtin.yum:
+    name: pgdg-redhat-repo
+    state: absent
+  ignore_errors: yes
+
+# 5. Kích hoạt lại module mặc định (nếu cần)
+- name: Reset PostgreSQL module
+  ansible.builtin.command: dnf -qy module reset postgresql
+  when: ansible_distribution_major_version | int >= 8
+  ignore_errors: yes

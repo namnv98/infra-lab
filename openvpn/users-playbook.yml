@@ -1,0 +1,40 @@
+---
+- name: Quản lý người dùng OpenVPN với htpasswd
+  hosts: vpn-server
+  become: true
+  vars:
+    htpasswd_file: /etc/openvpn/users.htpasswd
+    vpn_users:
+      - { username: "namnv", password: "namnv" }
+      - { username: "bob", password: "letmein" }
+
+  tasks:
+    - name: Cài gói apache2-utils (chứa htpasswd)
+      apt:
+        name: apache2-utils
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Cài gói httpd-tools (CentOS/RHEL)
+      yum:
+        name: httpd-tools
+        state: present
+      when: ansible_os_family == 'RedHat'
+
+    - name: Xoá file htpasswd cũ nếu tồn tại
+      file:
+        path: "{{ htpasswd_file }}"
+        state: absent
+
+    - name: Tạo file htpasswd rỗng với quyền phù hợp
+      copy:
+        content: ""
+        dest: "{{ htpasswd_file }}"
+        owner: root
+        group: nogroup
+        mode: '0640'
+
+    - name: Thêm user vào htpasswd (bcrypt hash)
+      shell: >
+        htpasswd -bB {{ htpasswd_file }} "{{ item.username }}" "{{ item.password }}"
+      loop: "{{ vpn_users }}"

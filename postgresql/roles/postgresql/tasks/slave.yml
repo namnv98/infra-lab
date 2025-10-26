@@ -1,0 +1,77 @@
+- name: Stop PostgreSQL service
+  systemd:
+    name: "{{ postgresql_service_name }}"
+    state: stopped
+  ignore_errors: true
+
+- name: Prepare temporary base backup directory
+  file:
+    path: "/tmp/pg_backup_temp"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: "0777"
+
+- name: Run pg_basebackup from master
+  become: yes
+  shell: |
+    export PGPASSWORD='{{ replication_password }}' && \
+    {{ postgresql_bin_dir }}/pg_basebackup \
+      -h {{ hostvars[groups['master'][0]]['ansible_host'] }} \
+      -D /tmp/pg_backup_temp \
+      -U {{ replication_user }} \
+      -v -P -X stream -R 2>&1 | tee /var/log/pg_basebackup.log
+  args:
+    executable: /bin/bash
+  register: backup_result
+
+- name: Remove existing PostgreSQL data directory
+  file:
+    path: "{{ postgresql_data_dir }}"
+    state: absent
+
+- name: Restore base backup to data directory
+  copy:
+    src: "/tmp/pg_backup_temp/"
+    dest: "{{ postgresql_data_dir }}/"
+    owner: postgres
+    group: postgres
+    mode: "0700"
+    remote_src: yes
+
+- name: Set ownership and permissions for data directory
+  file:
+    path: "{{ postgresql_data_dir }}"
+    owner: postgres
+    group: postgres
+    mode: "0700"
+    recurse: true
+
+- name: Create basic pg_hba.conf for replica
+  copy:
+    dest: "{{ postgresql_conf_dir }}/pg_hba.conf"
+    content: |
+      # TYPE  DATABASE  USER        ADDRESS             METHOD
+      local   all       postgres                         peer
+      local   all       all                              md5
+      host    all       all        0.0.0.0/0             md5
+    owner: postgres
+    group: postgres
+    mode: "0600"
+
+- name: Configure postgresql.conf for replica
+  blockinfile:
+    path: "{{ postgresql_conf_dir }}/postgresql.conf"
+    block: |
+      listen_addresses = '*'
+      port = {{ postgresql_port }}
+      hot_standby = on
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - REPLICA CONFIG"
+  tags:
+    - configure
+
+- name: Start PostgreSQL service
+  systemd:
+    name: "{{ postgresql_service_name }}"
+    state: started
+    enabled: yes

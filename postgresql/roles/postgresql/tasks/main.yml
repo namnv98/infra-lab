@@ -1,0 +1,32 @@
+- name: Include OS-specific variables
+  include_vars: "{{ item }}"
+  with_first_found:
+    - files:
+        - "{{ ansible_os_family }}.yml"
+      paths:
+        - "{{ role_path }}/vars"
+
+#- name: Uninstall PostgreSQL for RedHat-based systems
+#  import_tasks: redhat/uninstall_redhat.yml
+#  when: ansible_os_family == "RedHat"
+
+- name: Uninstall PostgreSQL for Debian-based systems
+  import_tasks: debian/uninstall_debian.yml
+  when: ansible_os_family == "Debian"
+
+- name: Install PostgreSQL for RedHat-based systems
+  import_tasks: redhat/install_redhat.yml
+  when: ansible_os_family == "RedHat"
+
+- name: Install PostgreSQL for Debian-based systems
+  import_tasks: debian/install_debian.yml
+  when: ansible_os_family == "Debian"
+
+
+- name: Configure master
+  import_tasks: master.yml
+  when: inventory_hostname in groups['master']
+
+- name: Configure slave
+  import_tasks: slave.yml
+  when: inventory_hostname in groups['slave']

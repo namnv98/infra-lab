@@ -1,0 +1,35 @@
+- name: Ensure apt dependencies are installed
+  apt:
+    name:
+      - gnupg
+      - lsb-release
+      - wget
+      - ca-certificates
+    state: present
+    update_cache: yes
+
+- name: Download PostgreSQL APT GPG key (ASCII)
+  get_url:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    dest: /usr/share/keyrings/postgresql.asc
+    mode: '0644'
+
+- name: Convert GPG key to keyring format
+  command: >
+    gpg --dearmor -o /usr/share/keyrings/postgresql.gpg /usr/share/keyrings/postgresql.asc
+  args:
+    creates: /usr/share/keyrings/postgresql.gpg
+
+- name: Add PostgreSQL APT repository
+  apt_repository:
+    repo: "deb [signed-by=/usr/share/keyrings/postgresql.gpg] http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    state: present
+    filename: 'pgdg'
+
+- name: Install PostgreSQL {{ postgresql_version }} server and client
+  apt:
+    name:
+      - "postgresql-{{ postgresql_version }}"
+      - "postgresql-client-{{ postgresql_version }}"
+    state: present
+    update_cache: yes

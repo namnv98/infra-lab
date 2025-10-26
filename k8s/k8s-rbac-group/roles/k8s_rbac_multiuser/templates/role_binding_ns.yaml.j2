@@ -1,0 +1,30 @@
+{% for group_name, cfg in k8s_rbac_groups.items() %}
+{% for ns in cfg.namespaces if ns != '*' %}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: {{ ns }}
+  name: {{ group_name }}-role
+rules:
+- apiGroups: [""]
+  resources: {{ cfg.resources }}
+  verbs: {{ cfg.verbs }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ group_name }}-binding
+  namespace: {{ ns }}
+subjects:
+{% for user in cfg.users %}
+- kind: ServiceAccount
+  name: {{ user }}-sa
+  namespace: {{ ns }}
+{% endfor %}
+roleRef:
+  kind: Role
+  name: {{ group_name }}-role
+  apiGroup: rbac.authorization.k8s.io
+---
+{% endfor %}
+{% endfor %}

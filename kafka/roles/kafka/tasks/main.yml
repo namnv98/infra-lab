@@ -1,0 +1,93 @@
+# ===== Tạo user và group kafka =====
+- name: Create kafka group
+  ansible.builtin.group:
+    name: '{{ kafka_group }}'
+    system: yes
+  become: true
+
+- name: Create kafka system user
+  ansible.builtin.user:
+    name: '{{ kafka_user }}'
+    group: '{{ kafka_group }}'
+    system: yes
+    shell: /bin/false
+    home: "{{ kafka_install_dir }}"
+  become: true
+
+# ===== Tạo các thư mục cần thiết =====
+- name: Create Kafka required directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    group: '{{ kafka_group }}'
+    owner: '{{ kafka_user }}'
+    mode: '0755'
+    recurse: true
+  loop:
+    - "{{ kafka_install_dir }}"
+    - "{{ kafka_log_dir }}"
+    - "{{ kafka_metadata_dir }}"
+    - "{{ kafka_data_dir }}"
+  become: true
+
+# ===== Tải và cài đặt Kafka =====
+- name: Download Kafka archive
+  ansible.builtin.get_url:
+    url: "{{ kafka_download_url }}"
+    dest: /tmp/kafka.tgz
+    timeout: 300
+    validate_certs: no
+  become: true
+
+- name: Extract Kafka to install directory
+  ansible.builtin.unarchive:
+    src: /tmp/kafka.tgz
+    dest: "{{ kafka_install_dir }}"
+    remote_src: true
+    extra_opts: [ "--strip-components=1" ]
+    group: '{{ kafka_group }}'
+    owner: '{{ kafka_user }}'
+  become: true
+
+# ===== Cấu hình Kafka =====
+- name: Generate Kafka config files
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ kafka_user }}"
+    group: "{{ kafka_group }}"
+    mode: "0644"
+  loop:
+    - { src: server.properties.j2, dest: "{{ kafka_install_dir }}/config/server.properties" }
+    - { src: kafka_server_jaas.conf.j2, dest: "{{ kafka_install_dir }}/config/kafka_server_jaas.conf" }
+    - { src: client.properties.j2, dest: "{{ kafka_install_dir }}/config/client.properties" }
+  become: true
+
+- name: Create systemd unit file
+  ansible.builtin.template:
+    src: kafka.service.j2
+    dest: /etc/systemd/system/kafka.service
+    mode: "0644"
+  notify: reload_systemd
+  become: true
+
+# ===== Khởi tạo metadata cho KRaft =====
+- name: Initialize Kafka storage metadata (KRaft mode)
+  ansible.builtin.shell: |
+    {{ kafka_install_dir }}/bin/kafka-storage.sh format \
+      --ignore-formatted \
+      -t "{{ kafka_cluster_id }}" \
+      -c {{ kafka_install_dir }}/config/server.properties
+  args:
+    executable: /bin/bash
+    creates: "{{ kafka_metadata_dir }}/meta.properties"
+  become: true
+
+# ===== Kích hoạt và chạy Kafka =====
+- name: Enable and start Kafka
+  ansible.builtin.systemd:
+    name: kafka
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true

@@ -1,0 +1,7 @@
+external_interface:
+vpn_subnet: 10.8.0.0/24
+private_subnet: 10.0.0.0
+server_public_ip: 34.124.241.221
+vpn_users:
+  - alice
+  - namnv

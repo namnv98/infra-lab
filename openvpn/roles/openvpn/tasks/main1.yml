@@ -1,0 +1,56 @@
+- name: Tắt và vô hiệu hoá OpenVPN server
+  become: true
+  systemd:
+    name: openvpn@server
+    state: stopped
+    enabled: false
+
+- name: Xoá thư mục cấu hình và chứng chỉ OpenVPN
+  become: true
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/openvpn/server.conf
+    - /etc/openvpn/easy-rsa
+    - /etc/openvpn/ta.key
+    - /etc/openvpn/*.ovpn
+    - /etc/iptables.rules
+
+- name: Xoá rule iptables mở port 1194
+  become: true
+  iptables:
+    chain: INPUT
+    protocol: udp
+    destination_port: 1194
+    jump: ACCEPT
+    state: absent
+
+- name: Xoá rule NAT iptables
+  become: true
+  iptables:
+    table: nat
+    chain: POSTROUTING
+    out_interface: "{{ external_interface }}"
+    source: "{{ vpn_subnet }}"
+    jump: MASQUERADE
+    state: absent
+
+- name: Tắt IP forwarding
+  become: true
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: '0'
+    state: present
+    reload: yes
+
+- name: Gỡ bỏ các gói đã cài
+  become: true
+  apt:
+    name:
+      - openvpn
+      - easy-rsa
+      - iptables
+    state: absent
+    purge: yes
+    autoremove: yes

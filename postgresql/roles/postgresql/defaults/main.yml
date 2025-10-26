@@ -1,0 +1,5 @@
+postgresql_version: "15"
+postgresql_port: 5432
+replication_user: "replicator"
+replication_password: "admin"
+admin_password: "admin"

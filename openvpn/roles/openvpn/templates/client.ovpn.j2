@@ -1,0 +1,28 @@
+client
+dev tun
+proto udp
+remote {{ server_public_ip }} 1194
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+cipher AES-256-GCM
+auth SHA256
+auth-user-pass
+
+<ca>
+{{ ca_content }}
+</ca>
+
+<cert>
+{{ cert_content }}
+</cert>
+
+<key>
+{{ key_content }}
+</key>
+
+<tls-crypt>
+{{ ta_content }}
+</tls-crypt>

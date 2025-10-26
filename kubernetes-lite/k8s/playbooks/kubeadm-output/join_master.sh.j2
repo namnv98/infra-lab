@@ -1,2 +1,0 @@
-#!/bin/bash
-kubeadm join 10.10.0.100:6443 --token akfv2z.g2afbmn3oyeo7ct9 --discovery-token-ca-cert-hash sha256:a217717142552bc656a05240a72ddc6180afd279d4276e3839c2461691f6a25d  --apiserver-advertise-address={{ apiserver_advertise_address }} --control-plane --certificate-key 7805e930bee18dc347575ee686f8955074c060f1b6a0a919cc875d121669fba4 --discovery-token-unsafe-skip-ca-verification --ignore-preflight-errors=all --cri-socket unix:///run/containerd/containerd.sock

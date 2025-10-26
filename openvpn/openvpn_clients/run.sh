@@ -1,0 +1,1 @@
+sudo openvpn --config namnv.ovpn --verb 4

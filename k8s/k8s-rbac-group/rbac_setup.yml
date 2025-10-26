@@ -1,0 +1,6 @@
+- hosts: master1
+  gather_facts: false
+  environment:
+    KUBECONFIG: /home/namnv/.kube/config
+  roles:
+    - k8s_rbac_multiuser

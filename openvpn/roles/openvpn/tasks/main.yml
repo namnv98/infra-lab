@@ -1,0 +1,170 @@
+- name: Cài đặt các gói cần thiết
+  apt:
+    name:
+      - openvpn
+      - easy-rsa
+      - iptables
+    state: present
+    update_cache: yes
+
+- name: Copy easy-rsa vào thư mục OpenVPN
+  copy:
+    src: /usr/share/easy-rsa/
+    dest: /etc/openvpn/easy-rsa/
+    remote_src: yes
+
+- name: Tạo chứng chỉ và key server
+  shell: |
+    set -e
+    export EASYRSA_BATCH=1
+    cd /etc/openvpn/easy-rsa
+    ./easyrsa init-pki
+    ./easyrsa build-ca nopass
+    ./easyrsa gen-dh
+    ./easyrsa build-server-full server nopass
+    openvpn --genkey secret /etc/openvpn/tls-crypt.key
+
+- name: Tạo cert và key cho từng người dùng
+  shell: |
+    export EASYRSA_BATCH=1
+    cd /etc/openvpn/easy-rsa
+    ./easyrsa build-client-full {{ item }} nopass
+  args:
+    creates: "/etc/openvpn/easy-rsa/pki/private/{{ item }}.key"
+  loop: "{{ vpn_users }}"
+
+- name: Upload auth_script.sh lên server OpenVPN
+  copy:
+    src: ./auth/auth_script.sh
+    dest: /etc/openvpn/auth_script.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Copy file cấu hình OpenVPN server
+  template:
+    src: server.conf.j2
+    dest: /etc/openvpn/server.conf
+  notify: Restart OpenVPN
+
+- name: Mở port UDP 1194
+  iptables:
+    chain: INPUT
+    protocol: udp
+    destination_port: 1194
+    jump: ACCEPT
+
+- name: Bật IP forwarding
+  sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    state: present
+    reload: yes
+
+
+- name: Lấy interface mặc định nếu external_interface chưa được truyền vào
+  command: ip route get 8.8.8.8
+  register: route_info
+  changed_when: false
+  when: (external_interface | default('', true) | string | trim | length) == 0
+
+- name: Parse interface từ output ip route
+  set_fact:
+    external_interface: "{{ (route_info.stdout | regex_findall('dev\\s+(\\S+)'))[0] }}"
+  when: (external_interface | default('', true) | string | trim | length) == 0
+
+- name: Debug external_interface
+  debug:
+    msg: "external_interface={{ external_interface }}"
+
+- name: Lấy danh sách rule NAT hiện có trong POSTROUTING
+  command: iptables -t nat -L POSTROUTING --line-numbers -n
+  register: nat_rules
+  changed_when: false
+
+- name: Xoá rule MASQUERADE cũ có subnet "{{ vpn_subnet }}"
+  shell: iptables -t nat -D POSTROUTING {{ item.split()[0] }}
+  loop: "{{ nat_rules.stdout_lines | reverse }}"
+  when: vpn_subnet in item and 'MASQUERADE' in item and item.split()[0] is match('^[0-9]+$')
+  ignore_errors: true
+
+- name: Thêm iptables NAT rule
+  iptables:
+    table: nat
+    chain: POSTROUTING
+    out_interface: "{{ external_interface | string }}"
+    source: "{{ vpn_subnet }}"
+    jump: MASQUERADE
+
+- name: Lưu iptables
+  shell: iptables-save > /etc/iptables.rules
+
+- name: Hiển thị iptables POSTROUTING
+  shell: iptables -t nat -L POSTROUTING --line-numbers -n -v
+  register: postrouting_output
+  changed_when: false
+  ignore_errors: true
+
+- debug:
+    var: postrouting_output.stdout_lines
+
+# Đọc CA và tls-auth key
+- name: Đọc CA certificate
+  slurp:
+    src: /etc/openvpn/easy-rsa/pki/ca.crt
+  register: ca_cert
+
+- name: Đọc tls-auth key
+  slurp:
+    src: /etc/openvpn/tls-crypt.key
+  register: ta_key
+
+# Đọc cert/key từng người dùng
+- name: Đọc client cert của từng user
+  slurp:
+    src: "/etc/openvpn/easy-rsa/pki/issued/{{ item }}.crt"
+  register: client_cert_files
+  loop: "{{ vpn_users }}"
+
+- name: Đọc client key của từng user
+  slurp:
+    src: "/etc/openvpn/easy-rsa/pki/private/{{ item }}.key"
+  register: client_key_files
+  loop: "{{ vpn_users }}"
+
+- name: Tạo map user -> cert/key
+  set_fact:
+    user_cert_map: "{{ dict(vpn_users | zip(client_cert_files.results | map(attribute='content') | list)) }}"
+    user_key_map: "{{ dict(vpn_users | zip(client_key_files.results | map(attribute='content') | list)) }}"
+
+- name: Sinh file .ovpn cho từng user
+  template:
+    src: client.ovpn.j2
+    dest: "/etc/openvpn/{{ item }}.ovpn"
+  vars:
+    ca_content: "{{ ca_cert.content | b64decode }}"
+    ta_content: "{{ ta_key.content | b64decode }}"
+    cert_content: "{{ user_cert_map[item] | b64decode }}"
+    key_content: "{{ user_key_map[item] | b64decode }}"
+  loop: "{{ vpn_users }}"
+
+- name: Tải file cấu hình client về local
+  fetch:
+    src: "/etc/openvpn/{{ item }}.ovpn"
+    dest: "./openvpn_clients/{{ item }}.ovpn"
+    flat: true
+  loop: "{{ vpn_users }}"
+
+- name: Bật dịch vụ OpenVPN
+  systemd:
+    name: openvpn@server
+    enabled: true
+    state: started
+  become: true
+
+# === Handler: restart openvpn ===
+- name: Restart OpenVPN
+  systemd:
+    name: openvpn@server
+    state: restarted
+  become: true

@@ -1,0 +1,156 @@
+---
+# =========================================
+# 1️⃣ Tạo namespace nếu chưa tồn tại
+# =========================================
+- name: Ensure namespaces exist
+  shell: kubectl create namespace {{ item }} --dry-run=client -o yaml | kubectl apply -f -
+  loop: "{{ k8s_rbac_namespaces }}"
+  args:
+    _uses_shell: true
+
+# =========================================
+# 2️⃣ Tạo ServiceAccount cho từng user
+# =========================================
+- name: Ensure ServiceAccounts for each user
+  shell: kubectl apply -f -
+  args:
+    stdin: "{{ lookup('template', 'service_account.yaml.j2') }}"
+    _uses_shell: true
+  loop: "{{ k8s_rbac_groups | dict2items }}"
+  loop_control:
+    loop_var: group
+
+# =========================================
+# 3️⃣ Sinh Role/RoleBinding cho từng namespace trong group
+# =========================================
+- name: Apply namespace Roles & Bindings
+  shell: kubectl apply -f -
+  args:
+    stdin: "{{ lookup('template', 'role_binding_ns.yaml.j2') }}"
+    _uses_shell: true
+
+# =========================================
+# 4️⃣ Sinh ClusterRole/ClusterRoleBinding nếu nhóm có namespace "*"
+# =========================================
+- name: Apply ClusterRoles & Bindings for global groups
+  when: "'*' in group.value.namespaces"
+  shell: kubectl apply -f -
+  args:
+    stdin: "{{ lookup('template', 'cluster_role_binding.yaml.j2') }}"
+    _uses_shell: true
+  loop: "{{ k8s_rbac_groups | dict2items }}"
+  loop_control:
+    loop_var: group
+
+# =========================================
+# 5️⃣ Sinh kubeconfig cho từng user
+# =========================================
+- name: Ensure remote kubeconfig dir
+  file:
+    path: "{{ kubeconfig_dir | default('/tmp/kubeconfigs') }}"
+    state: directory
+    mode: '0755'
+
+# ============================================================
+# 1️⃣ Generate kubeconfig cho nhóm namespace-scoped
+# ============================================================
+- name: Generate kubeconfig for namespace-scoped groups
+  when: group.value.namespaces != "*"
+  shell: |
+    {% for ns in group.value.namespaces %}
+    {% for user in group.value.users %}
+
+    echo "[INFO] Generating kubeconfig for user '{{ user }}' in namespace '{{ ns }}'"
+
+    KUBECONFIG_FILE="{{ kubeconfig_dir }}/{{ user }}.kubeconfig"
+
+    TOKEN=$(kubectl -n {{ ns }} create token {{ user }}-sa --duration={{ kube_token_duration }})
+
+    kubectl config set-cluster {{ kube_cluster_name }} \
+      --server={{ kube_apiserver_url }} \
+      --certificate-authority={{ kube_ca_path }} \
+      --embed-certs=true \
+      --kubeconfig="$KUBECONFIG_FILE"
+
+    kubectl config set-credentials {{ user }} \
+      --token="$TOKEN" \
+      --kubeconfig="$KUBECONFIG_FILE"
+
+    kubectl config set-context {{ user }}-context \
+      --cluster={{ kube_cluster_name }} \
+      --namespace={{ ns }} \
+      --user={{ user }} \
+      --kubeconfig="$KUBECONFIG_FILE"
+
+    kubectl config use-context {{ user }}-context \
+      --kubeconfig="$KUBECONFIG_FILE"
+
+    {% endfor %}
+    {% endfor %}
+  loop: "{{ k8s_rbac_groups | dict2items }}"
+  loop_control:
+    loop_var: group
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+
+- name: Generate kubeconfig for cluster-wide groups
+  when: group.value.namespaces == "*"
+  shell: |
+    set -euo pipefail
+    {% set ns = kube_default_namespace | default("default") %}
+    {% for user in group.value.users %}
+
+    echo "[INFO] Generating cluster-wide kubeconfig for '{{ user }}' (using SA in '{{ ns }}')"
+
+    # Create long-lived token
+    TOKEN=$(kubectl -n {{ ns }} create token {{ user }}-sa --duration={{ kube_token_duration }})
+
+    KUBECONFIG_FILE="{{ kubeconfig_dir }}/{{ user }}.kubeconfig"
+
+    kubectl config set-cluster {{ kube_cluster_name }} \
+      --server={{ kube_apiserver_url }} \
+      --certificate-authority={{ kube_ca_path }} \
+      --embed-certs=true \
+      --kubeconfig="$KUBECONFIG_FILE"
+
+    kubectl config set-credentials {{ user }} \
+      --token="$TOKEN" \
+      --kubeconfig="$KUBECONFIG_FILE"
+
+    kubectl config set-context {{ user }}-context \
+      --cluster={{ kube_cluster_name }} \
+      --user={{ user }} \
+      --kubeconfig="$KUBECONFIG_FILE"
+
+    kubectl config use-context {{ user }}-context \
+      --kubeconfig="$KUBECONFIG_FILE"
+
+    {% endfor %}
+  loop: "{{ k8s_rbac_groups | dict2items }}"
+  loop_control:
+    loop_var: group
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+
+
+# =========================================
+# 6️⃣ Copy kubeconfigs về localhost
+# =========================================
+- name: Ensure local kubeconfigs folder exists
+  file:
+    path: ./kubeconfigs
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+
+- name: Fetch kubeconfig files
+  fetch:
+    src: "{{ kubeconfig_dir | default('/tmp/kubeconfigs') }}/{{ item }}.kubeconfig"
+    dest: "./kubeconfigs/{{ item }}.kubeconfig"
+    flat: yes
+  loop: "{{ k8s_rbac_groups | dict2items | map(attribute='value.users') | flatten | unique }}"
+  ignore_errors: true

@@ -1,0 +1,33 @@
+
+kube_cluster_name: user-cluster
+kube_apiserver_url: "https://192.168.56.10:6443"
+kube_ca_path: "/etc/kubernetes/pki/ca.crt"
+kubeconfig_dir: "/tmp/kubeconfigs"
+
+# Token lifetime (1 năm)
+kube_token_duration: "8760h"
+
+# Danh sách namespace cần tạo
+k8s_rbac_namespaces:
+  - dev
+  - prod
+
+# Định nghĩa group + quyền + user (group-centric)
+k8s_rbac_groups:
+  dev-team:
+    namespaces: ["dev"]
+    verbs: ["get", "list", "watch"]
+    resources: ["pods", "configmaps"]
+    users: ["alice"]
+
+  ops-team:
+    namespaces: ["dev", "prod"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+    resources: ["pods", "services", "configmaps", "deployments"]
+    users: ["charlie"]
+
+  admin-team:
+    namespaces: "*"
+    verbs: [ "*" ]
+    resources: [ "*" ]
+    users: [ "admin" ]

@@ -1,0 +1,67 @@
+- name: Setup Kafka Cluster
+  hosts: kafka
+  become: true
+  tasks:
+
+    - name: Stop Kafka service if running
+      ansible.builtin.systemd:
+        name: kafka
+        state: stopped
+      ignore_errors: true
+      become: true
+      tags: uninstall
+
+    - name: Disable Kafka service
+      ansible.builtin.systemd:
+        name: kafka
+        enabled: false
+      ignore_errors: true
+      become: true
+      tags: uninstall
+
+    - name: Remove Kafka systemd service unit file
+      ansible.builtin.file:
+        path: /etc/systemd/system/kafka.service
+        state: absent
+      become: true
+      tags: uninstall
+
+    - name: Reload systemd daemon after removing Kafka service
+      ansible.builtin.systemd:
+        daemon_reload: true
+      become: true
+      tags: uninstall
+
+    - name: Remove Kafka data, logs, install and metadata directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ kafka_install_dir }}"
+        - "{{ kafka_data_dir }}"
+        - "{{ kafka_log_dir }}"
+        - "{{ kafka_metadata_dir }}"
+      become: true
+      tags: uninstall
+
+    - name: Remove Kafka archive if exists
+      ansible.builtin.file:
+        path: /tmp/kafka.tgz
+        state: absent
+      become: true
+      tags: uninstall
+
+    - name: Delete kafka system user
+      ansible.builtin.user:
+        name: kafka
+        state: absent
+        remove: true
+      become: true
+      tags: uninstall
+
+    - name: Delete kafka group (if created separately)
+      ansible.builtin.group:
+        name: kafka
+        state: absent
+      become: true
+      tags: uninstall

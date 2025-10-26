@@ -1,0 +1,5 @@
+- name: Triển khai OpenVPN
+  hosts: vpn-server
+  become: true
+  roles:
+    - openvpn

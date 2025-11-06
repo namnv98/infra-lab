@@ -5,10 +5,14 @@
 
   vars:
     devstack_user: stack
-    host_ip: 10.148.0.51
+    host_ip: "{{ ansible_host }}"
     admin_pass: admin
 
   tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
 
     - name: Cài đặt gói phụ thuộc
       apt:
@@ -18,7 +22,6 @@
           - python3-pip
           - net-tools
           - curl
-        update_cache: true
 
     - name: Tạo user stack
       user:
@@ -49,53 +52,7 @@
         creates: /opt/stack/devstack/.git
 
 
-#    - name: Tạo file local.conf (tạm với quyền root, bật QoS và bandwidth limit)
-#      copy:
-#        dest: "/opt/{{ devstack_user }}/devstack/local.conf"
-#        content: |
-#          [[local|localrc]]
-#          ADMIN_PASSWORD={{ admin_pass }}
-#          DATABASE_PASSWORD={{ admin_pass }}
-#          RABBIT_PASSWORD={{ admin_pass }}
-#          SERVICE_PASSWORD={{ admin_pass }}
-#          HOST_IP={{ host_ip }}
-#          LOGFILE=/opt/stack/logs/stack.sh.log
-#          LOGDAYS=2
-#        mode: '0644'
-
-#    - name: Tạo file local.conf (tạm với quyền root, bật QoS và bandwidth limit, không bật Trunk)
-#      copy:
-#        dest: "/opt/{{ devstack_user }}/devstack/local.conf"
-#        content: |
-#          [[local|localrc]]
-#          ADMIN_PASSWORD={{ admin_pass }}
-#          DATABASE_PASSWORD={{ admin_pass }}
-#          RABBIT_PASSWORD={{ admin_pass }}
-#          SERVICE_PASSWORD={{ admin_pass }}
-#          HOST_IP={{ host_ip }}
-#
-#          # Dịch vụ mạng Neutron và các extension
-#          Q_PLUGIN=ml2
-#          Q_AGENT=openvswitch
-#          ENABLED_SERVICES+=q-svc,q-agt,q-dhcp,q-l3,q-meta
-#          enable_service q-qos
-#
-#          LOGFILE=/opt/stack/logs/stack.sh.log
-#          LOGDAYS=2
-#
-#          # Extension driver cho ML2 (chỉ cần qos, bỏ trunk)
-#          [[post-config|/etc/neutron/plugins/ml2/ml2_conf.ini]]
-#          [ml2]
-#          mechanism_drivers = openvswitch,l2population
-#          extension_drivers = qos
-#
-#          [[post-config|/etc/neutron/neutron.conf]]
-#          [DEFAULT]
-#          service_plugins = router,qos
-#
-#        mode: '0644'
-
-    - name: Tạo file local.conf (tạm với quyền root, bật QoS và bandwidth limit, không bật Trunk)
+    - name: Tạo file local.conf (tạm với quyền root, bật QoS và bandwidth limit)
       copy:
         dest: "/opt/{{ devstack_user }}/devstack/local.conf"
         content: |
@@ -106,75 +63,9 @@
           SERVICE_PASSWORD={{ admin_pass }}
           HOST_IP={{ host_ip }}
           
-          # Nova
-          VIRT_DRIVER=libvirt
-          LIBVIRT_TYPE=qemu
-          
-          # Neutron
-          Q_PLUGIN=ml2
-          Q_AGENT=openvswitch
-          ENABLED_SERVICES+=q-svc,q-agt,q-dhcp,q-meta,q-l3
-          enable_service q-qos
-          
-          # Bật neutron plugin QoS
-          NEUTRON_SERVICE_PLUGINS=qos,router
-          
-          # Không dùng public interface thật, dùng NAT trong GCP
-          PUBLIC_INTERFACE=none
-          FLOATING_RANGE=172.24.4.0/24
-          FIXED_RANGE=10.0.0.0/24
-          
-          # Logging
           LOGFILE=/opt/stack/logs/stack.sh.log
           LOGDAYS=2
-
-          [[post-config|/etc/neutron/plugins/ml2/ml2_conf.ini]]
-          [ml2]
-          mechanism_drivers = openvswitch
-          extension_drivers = qos
-          
-          [[post-config|/etc/neutron/neutron.conf]]
-          [DEFAULT]
-          service_plugins = qos,router
         mode: '0644'
-
-    #    - name: Tạo file local.conf (tạm với quyền root, bật QoS và bandwidth limit)
-    #      copy:
-    #        dest: "/opt/{{ devstack_user }}/devstack/local.conf"
-    #        content: |
-    #          [[local|localrc]]
-    #          ADMIN_PASSWORD={{ admin_pass }}
-    #          DATABASE_PASSWORD={{ admin_pass }}
-    #          RABBIT_PASSWORD={{ admin_pass }}
-    #          SERVICE_PASSWORD={{ admin_pass }}
-    #          HOST_IP={{ host_ip }}
-    #
-    #          # Dịch vụ mạng Neutron và các extension
-    #          Q_PLUGIN=ml2
-    #          Q_AGENT=openvswitch
-    #          ENABLED_SERVICES+=q-svc,q-agt,q-dhcp,q-l3,q-meta
-    #          enable_service q-qos
-    #          enable_service q-trunk
-    #
-    #          LOGFILE=/opt/stack/logs/stack.sh.log
-    #          LOGDAYS=2
-    #
-    #          # Extension driver cho ML2 (QoS, Trunk, Port Security)
-    #          [[post-config|/etc/neutron/plugins/ml2/ml2_conf.ini]]
-    #          [ml2]
-    #          mechanism_drivers = openvswitch,l2population
-    #          extension_drivers = port_security,qos
-    #
-    #          [ml2_type_vlan]
-    #          network_vlan_ranges = physnet1:1000:2999
-    #
-    #          [[post-config|/etc/neutron/neutron.conf]]
-    #          [DEFAULT]
-    #          service_plugins = router,qos,trunk
-    #        mode: '0644'
-
-
-
 
     - name: Đổi chủ file local.conf thành stack
       file:

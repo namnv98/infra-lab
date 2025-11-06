@@ -1,12 +1,7 @@
 ---
-- name: Cài đặt DevStack trên Ubuntu
+- name: Cập nhật địa chỉ IP public cho OpenStack Endpoint cài trên GCP (sau khi cài DevStack)
   hosts: devstack
   become: true
-
-  vars:
-    devstack_user: stack
-    host_ip: 10.148.0.41
-    admin_pass: admin
 
   tasks:
     - name: Cập nhật endpoint IP từ {{ OLD_IP }} → {{ NEW_IP }}

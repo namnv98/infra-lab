@@ -1,16 +1,21 @@
 ---
-- name: Cập nhật địa chỉ IP public cho OpenStack Endpoint cài trên GCP (sau khi cài DevStack)
+- name: Cài đặt DevStack trên Ubuntu
   hosts: devstack
   become: true
+
+  vars:
+    devstack_user: stack
+    host_ip: 10.148.0.9
+    admin_pass: admin
 
   tasks:
     - name: Cập nhật endpoint IP từ {{ OLD_IP }} → {{ NEW_IP }}
       vars:
-        OLD_IP: "10.148.0.41"
-        NEW_IP: "35.197.146.206"
+        OLD_IP: "127.0.0.1"
+        NEW_IP: "136.110.63.19"
       shell: |
         source /opt/stack/devstack/openrc admin
-        openstack endpoint list --interface public -f value -c ID -c URL | while read ID URL; do
+        openstack endpoint list -f value -c ID -c URL | while read ID URL; do
           if echo "$URL" | grep -q "{{ OLD_IP }}"; then
             NEW_URL=$(echo "$URL" | sed "s|{{ OLD_IP }}|{{ NEW_IP }}|g")
             echo "openstack endpoint set --url '$NEW_URL' $ID"

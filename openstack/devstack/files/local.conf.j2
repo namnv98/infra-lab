@@ -1,0 +1,79 @@
+[[local|localrc]]
+ADMIN_PASSWORD={{ admin_pass }}
+DATABASE_PASSWORD={{ admin_pass }}
+RABBIT_PASSWORD={{ admin_pass }}
+SERVICE_PASSWORD={{ admin_pass }}
+HOST_IP={{ host_ip }}
+
+# OpenStack Images / Octavia
+DOWNLOAD_DEFAULT_IMAGES=True
+OCTAVIA_AMP_IMAGE_FILE=/var/tmp/amphora-x64-haproxy.qcow2
+IMAGE_URLS+="https://cloud-images.ubuntu.com/releases/jammy/release/ubuntu-22.04-server-cloudimg-amd64.img"
+
+# VNC / Horizon settings
+VNC_ENABLED=True
+VNC_SERVER_LISTEN=0.0.0.0
+VNC_SERVER_PROXYCLIENT_ADDRESS={{ ansible_host }}
+NOVNCPROXY_URL=http://{{ ansible_host }}:6080/vnc.html
+
+# Neutron
+Q_AGENT=ovn
+Q_ML2_PLUGIN_MECHANISM_DRIVERS=ovn,logger
+Q_ML2_PLUGIN_TYPE_DRIVERS=local,flat,vlan,geneve
+Q_ML2_TENANT_NETWORK_TYPE="geneve"
+ENABLE_CHASSIS_AS_GW=True
+enable_service ovn-northd
+enable_service ovn-controller
+enable_service q-ovn-metadata-agent
+
+# Use Neutron
+enable_service q-svc
+
+# Disable Neutron agents not used with OVN.
+disable_service q-agt
+disable_service q-l3
+disable_service q-dhcp
+disable_service q-meta
+
+# Enable services, these services depend on neutron plugin.
+enable_service q-trunk
+enable_service q-dns
+enable_service q-port-forwarding
+enable_service q-qos
+enable_service neutron-segments
+enable_service q-log
+
+# Public / Floating IP Configuration
+
+#Q_USE_PROVIDERNET_FOR_PUBLIC=False   # Không dùng IP public thật, dùng dải ảo
+
+# Network configuration
+#PUBLIC_NETWORK_NAME=public
+#PUBLIC_SUBNET_NAME=public-subnet
+#PUBLIC_NETWORK_GATEWAY=172.24.4.1
+#FLOATING_RANGE=172.24.4.100/28   # Dải IP mà DevStack cấp cho floating IP
+#FIXED_RANGE=10.0.0.0/24          # Dải IP private cho VM
+#FLAT_INTERFACE=eth0               # interface host dùng cho public network
+#OVN_ENABLE_SNAT=True              # Cho phép VM private ra Internet
+
+LOGFILE=/opt/stack/logs/stack.sh.log
+LOGDAYS=2
+
+disable_service tempest
+disable_service q-lbaas
+enable_plugin neutron https://opendev.org/openstack/neutron master
+enable_plugin barbican https://opendev.org/openstack/barbican master
+enable_plugin heat https://opendev.org/openstack/heat master
+enable_plugin heat-dashboard https://opendev.org/openstack/heat-dashboard master
+enable_plugin octavia https://opendev.org/openstack/octavia master
+enable_plugin octavia-dashboard https://opendev.org/openstack/octavia-dashboard master
+enable_plugin ovn-octavia-provider https://opendev.org/openstack/ovn-octavia-provider master
+enable_service s-proxy s-object s-container s-account
+enable_service octavia
+enable_service o-cw
+enable_service o-hk
+enable_service o-hm
+enable_service o-api
+enable_service o-da
+
+SWIFT_HASH=45383be854273fb7b7a6634b58581ed3

@@ -5,7 +5,7 @@
 
   vars:
     devstack_user: stack
-    host_ip: "{{ ansible_host }}"
+    host_ip: "127.0.0.1"
     admin_pass: admin
 
   tasks:
@@ -22,6 +22,7 @@
           - python3-pip
           - net-tools
           - curl
+        state: present
 
     - name: Tạo user stack
       user:
@@ -31,7 +32,7 @@
         state: present
         create_home: true
 
-    - name: Tạo thư mục home cho stack với quyền đúng
+    - name: Tạo thư mục home cho stack
       file:
         path: "/opt/{{ devstack_user }}"
         state: directory
@@ -42,8 +43,16 @@
     - name: Cho phép stack sudo không cần mật khẩu
       copy:
         dest: "/etc/sudoers.d/{{ devstack_user }}"
-        content: "{{ devstack_user }} ALL=(ALL) NOPASSWD: ALL\n"
+        content: "{{ devstack_user }} ALL=(ALL) NOPASSWD: ALL"
         mode: '0440'
+
+    - name: Tạo thư mục devstack
+      file:
+        path: "/opt/{{ devstack_user }}/devstack"
+        state: directory
+        owner: "{{ devstack_user }}"
+        group: "{{ devstack_user }}"
+        mode: '0755'
 
     - name: Clone DevStack repo as stack user (workaround)
       become: true
@@ -51,30 +60,46 @@
       args:
         creates: /opt/stack/devstack/.git
 
-
-    - name: Tạo file local.conf (tạm với quyền root, bật QoS và bandwidth limit)
-      copy:
-        dest: "/opt/{{ devstack_user }}/devstack/local.conf"
-        content: |
-          [[local|localrc]]
-          ADMIN_PASSWORD={{ admin_pass }}
-          DATABASE_PASSWORD={{ admin_pass }}
-          RABBIT_PASSWORD={{ admin_pass }}
-          SERVICE_PASSWORD={{ admin_pass }}
-          HOST_IP={{ host_ip }}
-          
-          LOGFILE=/opt/stack/logs/stack.sh.log
-          LOGDAYS=2
+    - name: Download Octavia Amphora image
+      ansible.builtin.get_url:
+        url: https://tarballs.opendev.org/openstack/octavia/test-images/test-only-amphora-x64-haproxy-ubuntu-focal.qcow2
+        dest: /var/tmp/amphora-x64-haproxy.qcow2
         mode: '0644'
+        force: no
 
-    - name: Đổi chủ file local.conf thành stack
-      file:
-        path: "/opt/{{ devstack_user }}/devstack/local.conf"
+    - name: Tạo file local.conf từ template
+      template:
+        src: files/local.conf.j2
+        dest: "/opt/{{ devstack_user }}/devstack/local.conf"
         owner: "{{ devstack_user }}"
         group: "{{ devstack_user }}"
+        mode: '0644'
 
-    - name: Chạy ./stack.sh dưới user stack (dùng sudo -u)
+    - name: Chạy ./stack.sh
       shell: sudo -u stack ./stack.sh
       args:
         chdir: "/opt/{{ devstack_user }}/devstack"
+
+    # nếu trên giao diện dashboard/project/api_access/ chưa nhận ip mới thì logout ra vào lại
+    - name: Cập nhật endpoint IP từ {{ OLD_IP }} → {{ NEW_IP }}
+      vars:
+        OLD_IP: "127.0.0.1"
+        NEW_IP: "{{ ansible_host }}"
+      shell: |
+        source /opt/stack/devstack/openrc admin
+        openstack endpoint list --interface public -f value -c ID -c URL | while read ID URL; do
+          if echo "$URL" | grep -q "{{ OLD_IP }}"; then
+            NEW_URL=$(echo "$URL" | sed "s|{{ OLD_IP }}|{{ NEW_IP }}|g")
+            echo "openstack endpoint set --url '$NEW_URL' $ID"
+            openstack endpoint set --url "$NEW_URL" "$ID"
+          fi
+        done
+      args:
+        executable: /bin/bash
+      register: endpoint_update_result
+
+    - name: In kết quả cập nhật endpoint
+      debug:
+        var: endpoint_update_result.stdout_lines
+
 

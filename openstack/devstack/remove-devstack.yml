@@ -1,3 +1,4 @@
+---
 - name: Gỡ hoàn toàn DevStack khỏi hệ thống Ubuntu
   hosts: devstack
   become: true
@@ -5,44 +6,58 @@
   vars:
     devstack_user: stack
     devstack_home: "/opt/{{ devstack_user }}"
+    etcd_data: "/opt/stack/data/etcd"
 
   tasks:
 
-    - name: Dừng tất cả process của user stack
+    - name: Dừng tất cả devstack@ services
       shell: |
-        pkill -u {{ devstack_user }} || true
+        systemctl stop devstack@* || true
+        systemctl disable devstack@* || true
+        rm -f /etc/systemd/system/devstack@*.service
+        rm -f /etc/systemd/system/multi-user.target.wants/devstack@*.service
+        systemctl daemon-reexec
+        systemctl daemon-reload
       ignore_errors: true
 
+    - name: Dừng tất cả process của user stack
+      shell: pkill -u {{ devstack_user }} || true
+      ignore_errors: true
 
-    - name: Kill etcd
+    - name: Kill tất cả process etcd
       shell: pgrep etcd | xargs -r kill -9
       ignore_errors: true
 
     - name: Kill process giữ /opt/stack/etcd
-      shell: fuser -km /opt/stack/etcd || true
+      shell: fuser -km {{ etcd_data }} || true
       ignore_errors: true
 
     - name: Unmount tất cả /opt/stack/data/etcd nếu đang bị mount
       shell: |
-        while mountpoint -q /opt/stack/data/etcd; do
-          umount -lf /opt/stack/data/etcd || true
+        while mountpoint -q {{ etcd_data }}; do
+          umount -lf {{ etcd_data }} || true
           sleep 1
         done
       ignore_errors: true
 
-    - name: Xóa thư mục DevStack, requirements và dữ liệu liên quan
+    - name: Xóa data etcd hoàn toàn
+      file:
+        path: "{{ etcd_data }}"
+        state: absent
+      ignore_errors: true
+
+    - name: Xóa thư mục DevStack, logs, requirements và stack home
       file:
         path: "{{ item }}"
         state: absent
       loop:
         - "{{ devstack_home }}/devstack"
         - "{{ devstack_home }}/requirements"
-        - "/etc/sudoers.d/{{ devstack_user }}"
-        - "/etc/systemd/system/devstack@*"
         - "/var/log/{{ devstack_user }}"
         - "/opt/stack"
-        - "/opt/{{ devstack_user }}"
+        - "{{ devstack_home }}"
         - "/opt/stack/logs"
+      ignore_errors: true
 
     - name: Xóa user stack và home
       user:
@@ -51,22 +66,22 @@
         remove: true
       ignore_errors: true
 
-    - name: Xóa container Docker (nếu có)
-      shell: |
-        docker ps -aq | xargs -r docker rm -f
+    - name: Xóa Docker containers (nếu có)
+      shell: docker ps -aq | xargs -r docker rm -f
       ignore_errors: true
 
-    - name: Xóa Docker network (nếu có)
-      shell: |
-        docker network ls -q | xargs -r docker network rm
+    - name: Xóa Docker networks (nếu có)
+      shell: docker network ls -q | xargs -r docker network rm
       ignore_errors: true
 
     - name: Xóa các bridge OVS (nếu có)
       shell: |
         ovs-vsctl list-br | xargs -r -n1 ovs-vsctl del-br
+        ovs-vsctl --if-exists del-br br-ex
+        ovs-vsctl --if-exists del-br br-int
       ignore_errors: true
 
-    - name: Xóa các interface ảo còn tồn tại (tap/qvo/qbr...)
+    - name: Xóa các interface ảo còn tồn tại (tap/qvo/qbr/qr-/fg-)
       shell: |
         ip link show | grep -E 'tap|qvo|qbr|qr-|fg-' | awk -F: '{print $2}' | xargs -r -n1 ip link delete
       ignore_errors: true
@@ -77,19 +92,18 @@
         virsh list --all --name | xargs -r -n1 virsh undefine
         virsh net-list --all --name | xargs -r -n1 virsh net-destroy
         virsh net-list --all --name | xargs -r -n1 virsh net-undefine
+        virsh pool-list --all --name | xargs -r -n1 virsh pool-destroy
+        virsh pool-list --all --name | xargs -r -n1 virsh pool-undefine
       ignore_errors: true
 
     - name: Reset iptables về mặc định
       shell: |
         iptables -F
         iptables -t nat -F
+        iptables -t mangle -F
+        iptables -t filter -F
         iptables -X
       ignore_errors: true
-
-    - name: Reload lại systemd để xóa cache các service đã xóa
-      shell: |
-        systemctl daemon-reexec
-        systemctl daemon-reload
 
     - name: Gỡ bỏ các gói có thể do DevStack cài thêm
       apt:
@@ -97,8 +111,21 @@
           - mariadb-server
           - rabbitmq-server
           - etcd
+          - etcd-client
           - openvswitch-switch
           - docker.io
+          - memcached
+          - haproxy
+          - python3-pip
+          - python3-venv
+          - python3-dev
         state: absent
         purge: true
         autoremove: true
+      ignore_errors: true
+
+    - name: Kiểm tra port etcd 2379 và 2380 đã trống
+      shell: |
+        lsof -i :2379 || echo "Port 2379 trống"
+        lsof -i :2380 || echo "Port 2380 trống"
+      ignore_errors: true

@@ -1,8 +1,3 @@
-Cảm ơn bạn xác nhận — vậy mình sẽ hướng dẫn lại toàn bộ quy trình xử lý **chuẩn xác**, khi:
-
-* ✅ **Bạn KHÔNG muốn dùng `admin` để thao tác**
-* ✅ Subnet + Network + VM đều nằm trong project `myproject`
-* ❌ Và bạn **không thể gán subnet từ `admin`** vào router trong `myproject`
 
 ---
 

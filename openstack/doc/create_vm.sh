@@ -24,6 +24,20 @@ gcloud compute instances create "devstack" \
   --scopes=cloud-platform
 
 
+
+gcloud compute instances create "devstack" \
+  --project="reflected-disk-477514-v5" \
+  --zone="asia-southeast1-a" \
+  --machine-type="e2-standard-4" \
+  --image-family="ubuntu-2204-lts" \
+  --image-project="ubuntu-os-cloud" \
+  --boot-disk-size="60GB" \
+  --boot-disk-type="pd-standard" \
+  --metadata=enable-oslogin=false,enable-osconfig=TRUE,ssh-keys="namnv:ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIADjjf10H0L49MtlAuFwmyAS3nAk5/dd3nIpRFsOuMwd" \
+  --tags="my-rule"
+
+
+
 gcloud beta compute instances delete devstack \
   --zone=asia-southeast1-a \
   --quiet \

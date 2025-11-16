@@ -102,4 +102,25 @@
       debug:
         var: endpoint_update_result.stdout_lines
 
+    - name: Copy setup scripts to /opt/stack/devstack/
+      copy:
+        src: "files/{{ item }}"
+        dest: "/opt/stack/devstack/{{ item }}"
+        mode: '0755'
+        owner: stack
+        group: stack
+      with_items:
+        - setup-network.sh
+        - setup-security.sh
+        - create-vm.sh
+        - setup-host-nat.sh
 
+    - name: Run all setup scripts in order
+      become_user: stack
+      args:
+        chdir: /opt/stack/devstack
+      shell: |
+        ./setup-network.sh
+        ./setup-security.sh
+        ./create-vm.sh
+        ./setup-host-nat.sh

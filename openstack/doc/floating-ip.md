@@ -1,3 +1,27 @@
+Ok, bạn cho dải **10.0.0.0/26**. Chúng ta tính số IP trong dải này nhé:
+
+* CIDR `/26` nghĩa là **26 bit dành cho network** và **6 bit cho host** (32 − 26 = 6).
+* Số host khả dụng = 2^6 = 64 IP.
+
+Trong đó:
+
+* **1 IP là network address** (10.0.0.0)
+* **1 IP là broadcast address** (10.0.0.63)
+* Số IP có thể gán cho host = 64 − 2 = **62 IP**
+
+✅ Vậy dải **10.0.0.0/26** có **62 IP có thể dùng cho host**.
+
+
+
+
+
+
+
+
+
+
+
+
 # **Floating IP và Floating IP Pool trong OpenStack & DevStack**
 
 ## **I. Khái Niệm Cốt Lõi**

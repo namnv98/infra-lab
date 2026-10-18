@@ -7,6 +7,7 @@
     - backup/etcd     # cài etcdctl trước (apiserver_hardening dùng để kiểm tra Secret đã mã hoá) + backup hằng ngày
     - security/apiserver   # audit log, mã hoá Secret, tắt profiling
     - security/pod_security    # Pod Security Admission: restricted cho namespace app
+    - security/resource_policy # LimitRange + ResourceQuota cho namespace app
     - security/kyverno         # policy engine: namespace app chỉ chạy image từ Harbor
     - security/netpol          # default-deny + chỉ mở đúng luồng cần
     - security/kube_bench      # chấm điểm CIS Benchmark

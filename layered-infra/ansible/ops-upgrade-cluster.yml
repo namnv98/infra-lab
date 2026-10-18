@@ -1,0 +1,139 @@
+# NÂNG CẤP Kubernetes lên k8s_version (group_vars/all/versions.yml) — chạy tay, không nằm trong site.yml.
+#   1. Sửa k8s_version (cùng minor: bản vá; lên minor mới: đọc release notes, chỉ nhảy 1 minor mỗi lần)
+#   2. ansible-playbook ops-upgrade-cluster.yml          (chạy với phiên bản hiện tại = không đổi gì)
+# Thứ tự: snapshot etcd → master đầu `kubeadm upgrade apply` → master khác `kubeadm upgrade node`
+#         → từng node (master trước, worker sau): drain → nâng kubelet/kubectl → restart → uncordon → chờ Ready.
+- name: Kiểm tra trước khi nâng cấp + snapshot etcd
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  environment: { KUBECONFIG: /etc/kubernetes/admin.conf }
+  tasks:
+    - name: Mọi node đang Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready node --all --timeout=60s
+      changed_when: false
+
+    - name: Phiên bản đang chạy
+      ansible.builtin.command: kubectl version -o json
+      register: kver
+      changed_when: false
+
+    - name: Ghi nhận phiên bản
+      ansible.builtin.set_fact:
+        k8s_current: "{{ (kver.stdout | from_json).serverVersion.gitVersion | regex_replace('^v', '') }}"
+
+    - name: Không hạ cấp, không nhảy quá 1 minor
+      ansible.builtin.assert:
+        that:
+          - k8s_version is version(k8s_current, '>=')
+          - (k8s_version.split('.')[1] | int) - (k8s_current.split('.')[1] | int) <= 1
+        fail_msg: "Đang chạy {{ k8s_current }}, muốn lên {{ k8s_version }}: chỉ được nâng, tối đa 1 minor mỗi lần"
+
+    - name: Snapshot etcd ngay trước khi nâng (script của role backup/etcd)
+      ansible.builtin.command: /usr/local/sbin/etcd-backup.sh
+      when: k8s_version != k8s_current
+      changed_when: true
+
+- name: Nâng control plane
+  hosts: k8s_control_plane
+  become: true
+  serial: 1
+  environment: "{{ egress_env | combine({'KUBECONFIG': '/etc/kubernetes/admin.conf'}) }}"
+  vars:
+    k8s_current: "{{ hostvars[groups['k8s_control_plane'][0]].k8s_current }}"
+  tasks:
+    - name: Nâng gói kubeadm
+      ansible.builtin.apt:
+        name: "kubeadm={{ k8s_version }}-*"
+        allow_change_held_packages: true
+        update_cache: true
+      when: k8s_version != k8s_current
+
+    - name: Xem trước (kubeadm upgrade plan)
+      ansible.builtin.command: kubeadm upgrade plan v{{ k8s_version }}
+      register: kubeadm_plan   # KHÔNG đặt "plan": đè biến plan (plan.yml) mà mọi biến khác dùng
+      changed_when: false
+      when: inventory_hostname == first_cp and k8s_version != k8s_current
+
+    - name: Master đầu — kubeadm upgrade apply
+      ansible.builtin.command: kubeadm upgrade apply v{{ k8s_version }} --yes
+      when: inventory_hostname == first_cp and k8s_version != k8s_current
+      changed_when: true
+
+    - name: Master khác — kubeadm upgrade node
+      ansible.builtin.command: kubeadm upgrade node
+      when: inventory_hostname != first_cp and k8s_version != k8s_current
+      changed_when: true
+
+- name: Nâng kubelet/kubectl từng node (master trước, worker sau)
+  hosts: "{{ groups['k8s_control_plane'] + groups['k8s_workers'] }}"
+  become: true
+  serial: 1
+  environment: "{{ egress_env }}"
+  vars:
+    k8s_current: "{{ hostvars[groups['k8s_control_plane'][0]].k8s_current }}"
+    kubectl_admin: kubectl --kubeconfig /etc/kubernetes/admin.conf
+  tasks:
+    - name: Kubelet trên node đang chạy bản nào
+      ansible.builtin.command: kubelet --version
+      register: kubelet_ver
+      changed_when: false
+
+    - name: Nâng node này
+      when: kubelet_ver.stdout.split()[-1] != 'v' ~ k8s_version
+      block:
+        - name: Drain (đẩy pod sang node khác; tôn trọng PodDisruptionBudget)
+          ansible.builtin.command: >-
+            {{ kubectl_admin }} drain {{ inventory_hostname }} --ignore-daemonsets --delete-emptydir-data --timeout=300s
+          delegate_to: "{{ first_cp }}"
+          changed_when: true
+
+        - name: Worker — kubeadm upgrade node (cập nhật cấu hình kubelet)
+          ansible.builtin.command: kubeadm upgrade node
+          when: inventory_hostname in groups['k8s_workers']
+          changed_when: true
+
+        - name: Nâng kubelet, kubectl (và kubeadm trên worker)
+          ansible.builtin.apt:
+            name: ["kubelet={{ k8s_version }}-*", "kubectl={{ k8s_version }}-*", "kubeadm={{ k8s_version }}-*"]
+            allow_change_held_packages: true
+            update_cache: true
+
+        - name: Giữ phiên bản (apt upgrade không tự nâng)
+          ansible.builtin.dpkg_selections: { name: "{{ item }}", selection: hold }
+          loop: [kubelet, kubeadm, kubectl]
+
+        - name: Khởi động lại kubelet
+          ansible.builtin.systemd: { name: kubelet, state: restarted, daemon_reload: true }
+
+        - name: Chờ node Ready với phiên bản mới
+          ansible.builtin.command: >-
+            {{ kubectl_admin }} get node {{ inventory_hostname }} -o jsonpath='{.status.nodeInfo.kubeletVersion} {.status.conditions[?(@.type=="Ready")].status}'
+          delegate_to: "{{ first_cp }}"
+          register: node_state
+          retries: 30
+          delay: 10
+          until: node_state.stdout == 'v' ~ k8s_version ~ ' True'
+          changed_when: false
+
+      always:
+        - name: Uncordon (kể cả khi bước giữa lỗi — không để node bị khoá)
+          ansible.builtin.command: "{{ kubectl_admin }} uncordon {{ inventory_hostname }}"
+          delegate_to: "{{ first_cp }}"
+          changed_when: true
+
+- name: Kiểm tra sau nâng cấp
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  environment: { KUBECONFIG: /etc/kubernetes/admin.conf }
+  tasks:
+    - name: Mọi node Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready node --all --timeout=300s
+      changed_when: false
+
+    - name: Phiên bản các node
+      ansible.builtin.command: kubectl get nodes -o custom-columns=NODE:.metadata.name,KUBELET:.status.nodeInfo.kubeletVersion
+      register: nodes
+      changed_when: false
+
+    - name: Kết quả
+      ansible.builtin.debug: { msg: "{{ nodes.stdout_lines }} — chạy tiếp: make test" }

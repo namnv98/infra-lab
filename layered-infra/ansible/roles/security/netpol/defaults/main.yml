@@ -1,0 +1,19 @@
+# Mặc định chặn cho mọi namespace (trừ kube-system: Cilium, CoreDNS, control plane — hostNetwork, quản lý riêng).
+# Mỗi namespace: chặn hết vào/ra, rồi mở: trong cùng namespace, DNS, apiserver, Prometheus scrape + phần riêng dưới đây.
+# Thiết kế: docs/thiet-ke-k8s-production.md mục F. Pod hostNetwork (speaker MetalLB, node-exporter) không bị ảnh hưởng.
+netpol_namespaces:
+  default:            { deny_all: true }   # không chạy app
+  gateway:            { deny_all: true }   # chỉ chứa object Gateway; Envoy chạy trong kube-system
+  kube-bench:         { deny_all: true }   # job chấm điểm đọc file trên node, không cần mạng
+  local-path-storage: {}
+  cert-manager:       { webhook: true }
+  kyverno:            { webhook: true }
+  metallb-system:     { webhook: true }
+  velero:
+    egress_cidr: [{ cidr: "{{ svc_ip }}/32", port: "3900" }]   # kho S3 Garage trên infra-01
+  monitoring:
+    webhook: true                              # prometheus-operator
+    from_gateway: true                         # Grafana trên siem-01 đọc Prometheus qua Gateway internal
+    scrape_all: true                           # Prometheus thu số liệu mọi pod + node (kubelet, node-exporter)
+# Chỉ áp cho các namespace này (rỗng = tất cả) — để triển khai từng đợt: -e '{"netpol_only": ["velero"]}'
+netpol_only: []

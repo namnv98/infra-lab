@@ -1,3 +1,11 @@
-- name: NetworkPolicy cho namespace demo
+- name: "NetworkPolicy cho namespace demo (app: chỉ nhận từ Gateway)"
   kubernetes.core.k8s:
     template: demo-netpol.yaml.j2
+
+- name: Mặc định chặn cho các namespace còn lại (CiliumNetworkPolicy "baseline")
+  kubernetes.core.k8s:
+    template: baseline-netpol.yaml.j2
+  vars: { netpol_ns: "{{ item.key }}", netpol_cfg: "{{ item.value }}" }   # tên riêng: biến register "cfg" của role khác được ưu tiên hơn biến task
+  loop: "{{ netpol_namespaces | dict2items }}"
+  loop_control: { label: "{{ item.key }}" }
+  when: not netpol_only or item.key in netpol_only

@@ -1,0 +1,18 @@
+# Giới hạn tài nguyên cho namespace app (nhãn lab/policy=strict) + default. Thiết kế: docs/thiet-ke-k8s-production.md mục D.
+# Không đặt limit CPU mặc định (bóp CPU gây chậm khó đoán — thông lệ hiện nay), chỉ limit RAM.
+resource_default_request: { cpu: 50m, memory: 64Mi }   # pod không khai báo thì nhận mức này
+resource_default_limit: { memory: 256Mi }
+resource_max_container: { memory: 1Gi }                # 1 container không được xin quá
+resource_quota_app:                                    # tổng cho mỗi namespace app
+  requests.cpu: "1"
+  requests.memory: 1Gi
+  limits.memory: 2Gi
+  pods: "20"
+  persistentvolumeclaims: "5"
+  requests.storage: 10Gi
+  services.loadbalancers: "0"                          # app ra ngoài qua Gateway, không tự xin IP MetalLB
+  services.nodeports: "0"
+resource_quota_default:                                # namespace default: không dùng để chạy app
+  pods: "5"
+  services.loadbalancers: "0"
+  services.nodeports: "0"

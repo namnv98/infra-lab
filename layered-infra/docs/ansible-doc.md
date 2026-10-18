@@ -12,14 +12,15 @@ ansible/
 ├── 00-firewall-bootstrap.yml         # [bootstrap] lần đầu: nạp config 2 firewall (GCP console / on-prem USB), dựng VPN, bật VPN
 ├── 10-network.yml                    # [network] luật/NAT/DNS 2 firewall, jump server, DNS+NTP cho mọi VM
 ├── 20-kubernetes.yml                 # [kubernetes] containerd, kubeadm, master (kube-vip), worker, Cilium
-├── 30-cluster-addons.yml             # [addons] Helm, MetalLB, Gateway API, cert-manager, 2 Gateway
+├── 30-cluster-addons.yml             # [addons] Helm, chứng chỉ kubelet, MetalLB, Gateway API, cert-manager, 2 Gateway, metrics-server, StorageClass
 ├── 40-shared-services.yml            # [services] Harbor + Squid + S3 Garage trên infra-01; node kéo image qua Harbor
 ├── 50-apps-edge.yml                  # [apps] app demo + HAProxy/WAF trên edge-01
-├── 60-security.yml                   # [security] siết apiserver, PSA, Kyverno, NetworkPolicy, kube-bench, backup etcd
+├── 60-security.yml                   # [security] siết apiserver, PSA, LimitRange/Quota, Kyverno, NetworkPolicy mọi namespace, kube-bench, backup etcd
 ├── 70-observability.yml              # [observability] metrics: Prometheus · siem: Loki/Alloy/Grafana, syslog, auditd, Wazuh
-├── 80-backup.yml                     # [backup] Velero → S3 trên infra-01
+├── 80-backup.yml                     # [backup] Velero (cả dữ liệu volume, node-agent) → S3 trên infra-01
 ├── ops-harbor-prewarm.yml            # [prewarm] nạp cache Harbor bằng mọi image đang chạy (trước khi khoá đường ra Internet)
 ├── ops-etcd-restore.yml              # chạy tay: KHÔI PHỤC etcd từ snapshot (phá huỷ thay đổi sau snapshot)
+├── ops-upgrade-cluster.yml           # chạy tay: NÂNG CẤP K8s lên k8s_version (snapshot etcd, kubeadm upgrade, drain từng node)
 │
 ├── inventories/
 │   ├── plan_inventory.py             # sinh inventory từ envs/<env>/plan.yml (gốc dự án): nhóm theo vai trò + vùng, ansible_host, biến `plan`
@@ -70,6 +71,10 @@ ansible/
     │   ├── control_plane/            #   main.yml chọn: init.yml (master đầu) hoặc join.yml (master sau)
     │   ├── kube_vip/                 #   VIP cho API server (gọi từ control_plane)
     │   ├── worker/                   #   join worker
+    │   ├── kubelet_csr_approver/     #   tự duyệt CSR chứng chỉ phục vụ của kubelet (tên + IP node khớp)
+    │   ├── kubelet_tls/              #   kubelet dùng chứng chỉ do CA cluster ký (serverTLSBootstrap), quyền file 600
+    │   ├── metrics_server/           #   kubectl top, HPA (TLS kiểm chứng 2 chiều, cert từ cert-manager)
+    │   ├── storage/                  #   StorageClass "standard" mặc định (local-path-provisioner)
     │   ├── cilium/                   #   CNI
     │   ├── helm/                     #   helm + thư viện Python kubernetes trên master
     │   ├── metallb/                  #   IP cho Service LoadBalancer (2 pool public/internal)
@@ -84,9 +89,10 @@ ansible/
     │   ├── bastion/                  #   jump-01: siết SSH, ghi lại lệnh gõ trong phiên (pam_tty_audit)
     │   ├── apiserver/                #   audit log, mã hoá Secret, tắt profiling
     │   ├── pod_security/             #   Pod Security Admission (restricted cho namespace app)
-    │   ├── kyverno/                  #   policy: namespace app chỉ chạy image từ Harbor
-    │   ├── netpol/                   #   NetworkPolicy default-deny + mở đúng luồng
-    │   └── kube_bench/               #   chấm điểm CIS Benchmark
+    │   ├── resource_policy/          #   LimitRange (mặc định + trần) + ResourceQuota cho namespace app
+    │   ├── kyverno/                  #   policy: app chỉ chạy image từ Harbor; bắt buộc requests/limits, cấm :latest
+    │   ├── netpol/                   #   CiliumNetworkPolicy mặc định chặn mọi namespace (trừ kube-system) + mở đúng luồng
+    │   └── kube_bench/               #   chấm điểm CIS Benchmark; ngoại lệ có lý do ở defaults (kube_bench_accepted)
     ├── observability/
     │   ├── siem/                     #   siem-01: Loki, Alloy (nhận syslog), Grafana (dashboard, cảnh báo email), Mailpit, Wazuh manager
     │   ├── loki_replica/             #   bản sao Loki trên infra-01 (dùng lại loki.yaml của siem)
@@ -96,7 +102,7 @@ ansible/
     │   └── prometheus/               #   Prometheus + node-exporter + kube-state-metrics, route qua Gateway internal
     ├── backup/
     │   ├── etcd/                     #   etcdctl + script snapshot etcd hằng ngày (systemd timer)
-    │   └── velero/                   #   Velero backup namespace/app → S3 Garage
+    │   └── velero/                   #   Velero backup namespace/app + dữ liệu volume → S3 Garage
     └── apps/
         └── whoami/                   #   app demo (image qua Harbor) sau Gateway public
 ```

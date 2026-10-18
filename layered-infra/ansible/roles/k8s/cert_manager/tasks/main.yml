@@ -13,6 +13,10 @@
         apiVersion: controller.config.cert-manager.io/v1alpha1
         kind: ControllerConfiguration
         gatewayAPI: { enabled: true }   # tự cấp cert cho listener HTTPS của Gateway
+      resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } }
+      webhook: { resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } } }
+      cainjector: { resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } } }
+      startupapicheck: { resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } } }
 
 - name: CA riêng của lab (self-signed root → ClusterIssuer lab-ca)
   kubernetes.core.k8s:

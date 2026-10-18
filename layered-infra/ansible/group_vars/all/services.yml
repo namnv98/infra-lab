@@ -28,6 +28,8 @@ squid_allowed_domains:
   - kyverno.github.io                # Helm chart Kyverno
   - prometheus-community.github.io   # Helm chart kube-prometheus-stack
   - vmware-tanzu.github.io           # Helm chart Velero
+  - kubernetes-sigs.github.io        # Helm chart metrics-server
+  - postfinance.github.io            # Helm chart kubelet-csr-approver
 
 # Đặt vào environment của play cần tải từ Internet (helm, get_url, unarchive)
 proxy_env:

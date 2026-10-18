@@ -81,7 +81,7 @@ layered-infra/
 │   ├── fw-console-bootstrap.py   # nạp config bootstrap qua serial console ở lần boot đầu
 │   └── harbor-prewarm.sh         # nạp cache Harbor bằng image cluster đang dùng
 ├── ansible/          # site.yml (thứ tự dựng) + playbook 00–80 + inventories/{gcp,onprem} + group_vars + roles/<tầng>/<tên>  (đọc docs/ansible-doc.md)
-├── test/smoke.sh     # kiểm thử đầu-cuối trên lab đang chạy (make test): web/WAF, VPN, egress, DMZ, cluster, SIEM
+├── test/smoke.sh     # kiểm thử đầu-cuối trên lab đang chạy (make test): web/WAF, VPN, egress, DMZ, cluster, prod, SIEM
 ├── docs/             # architecture.html (sơ đồ, luồng, ma trận luật — sinh từ docs/src/*.py) · ansible-doc.md
 ├── .editorconfig · .yamllint   # định dạng chung, luật yamllint (pre-commit + CI ở gốc repo: ../.pre-commit-config.yaml, ../.github/)
 └── out/              # bí mật, kubeconfig, log — KHÔNG commit (đã có trong .gitignore)
@@ -99,7 +99,7 @@ cd ~/labs/infra-lab/layered-infra
 make up                 # sinh config bootstrap + tạo hạ tầng (hỏi xác nhận)
 make bootstrap          # console 2 firewall → API biên qua WAN dựng VPN → bật VPN → 10-network.yml cho cả hai qua VPN
 make cluster            # K8s → addon → Harbor/Squid → nạp cache → khoá egress → bảo mật ‖ SIEM → backup (~25 phút)
-make test               # kiểm thử đầu-cuối (~1 phút): 25 kiểm thử, thoát lỗi nếu có kiểm thử không đạt
+make test               # kiểm thử đầu-cuối (~2 phút): 33 kiểm thử, thoát lỗi nếu có kiểm thử không đạt (./test/smoke.sh prod: chỉ 1 nhóm)
 ```
 
 Trước khi commit: `make lint` (yamllint, ansible-lint, tofu fmt, kiểm tra plan.yml) và `make validate` (cú pháp tofu/Ansible).
@@ -120,6 +120,8 @@ ansible-playbook site.yml --tags network          # sau khi sửa luật firewal
 ansible-playbook site.yml --tags observability    # sửa SIEM/cảnh báo
 ansible-playbook site.yml --list-tags             # tag: bootstrap (chỉ khi gọi đích danh) network kubernetes addons services apps prewarm security observability(metrics, siem) backup
 ansible-lint                                      # kiểm tra trước khi chạy (.ansible-lint)
+ansible-playbook ops-upgrade-cluster.yml          # nâng cấp K8s sau khi đổi k8s_version (versions.yml): drain từng node
+ansible-playbook ops-etcd-restore.yml             # khôi phục etcd từ snapshot (phá huỷ thay đổi sau snapshot)
 ```
 
 **Đổi IP / thêm máy**: chỉ sửa `envs/gcp/plan.yml` → `python3 scripts/plan.py check` (IP ngoài dải,

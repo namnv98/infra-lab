@@ -1,0 +1,4 @@
+# Mục FAIL đã xem xét và CHẤP NHẬN (có lý do) — docs/thiet-ke-k8s-production.md mục H
+kube_bench_accepted:
+  "1.1.12": "kubeadm chạy etcd bằng root trong pod tĩnh, không có user etcd; đổi chủ thư mục không tăng an toàn"
+  "4.3.1": "không có kube-proxy (Cilium thay thế: kube-proxy-replacement)"

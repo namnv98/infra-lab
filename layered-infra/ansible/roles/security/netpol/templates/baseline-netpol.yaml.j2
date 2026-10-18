@@ -1,0 +1,32 @@
+# Do Ansible quản lý (role security/netpol): mặc định chặn cho namespace {{ netpol_ns }}.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: baseline, namespace: {{ netpol_ns }} }
+spec:
+  endpointSelector: {}
+{% if netpol_cfg.deny_all | default(false) %}
+  ingressDeny: [{ fromEntities: [all] }]
+  egressDeny: [{ toEntities: [all] }]
+{% else %}
+  ingress:
+    - fromEndpoints: [{}]                                          # trong cùng namespace
+    - fromEndpoints: [{ matchLabels: { k8s:io.kubernetes.pod.namespace: monitoring } }]   # Prometheus thu số liệu
+{% if netpol_cfg.webhook | default(false) %}
+    - fromEntities: [kube-apiserver, host, remote-node]            # apiserver gọi admission webhook
+{% endif %}
+{% if netpol_cfg.from_gateway | default(false) %}
+    - fromEntities: [ingress]                                      # Envoy của Gateway
+{% endif %}
+  egress:
+    - toEndpoints: [{}]
+    - toEndpoints: [{ matchLabels: { k8s:io.kubernetes.pod.namespace: kube-system, k8s-app: kube-dns } }]
+      toPorts: [{ ports: [{ port: "53", protocol: ANY }] }]
+    - toEntities: [kube-apiserver]
+{% if netpol_cfg.scrape_all | default(false) %}
+    - toEntities: [cluster]                                        # mọi pod + node trong cluster
+{% endif %}
+{% for c in netpol_cfg.egress_cidr | default([]) %}
+    - toCIDR: ["{{ c.cidr }}"]
+      toPorts: [{ ports: [{ port: "{{ c.port }}", protocol: TCP }] }]
+{% endfor %}
+{% endif %}

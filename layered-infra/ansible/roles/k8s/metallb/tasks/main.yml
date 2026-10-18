@@ -18,6 +18,8 @@
     wait: true
     values:
       frrk8s: { enabled: false }   # FRR chỉ cần cho BGP; lab dùng L2 (ARP) → bớt 6 pod
+      controller: { resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } } }
+      speaker: { resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } } }
 
 - name: Dải IP và cách quảng bá (L2/ARP)
   kubernetes.core.k8s:

@@ -34,6 +34,8 @@ apiServer:
     - { name: encryption-provider-config, value: /etc/kubernetes/enc/encryption-config.yaml }
     - { name: profiling, value: "false" }
     - { name: service-account-extend-token-expiration, value: "false" }
+    # apiserver kiểm chứng kubelet bằng CA của cluster (kube-bench 1.2.5) — cần kubelet có chứng chỉ phục vụ do CA ký (role k8s/kubelet_tls)
+    - { name: kubelet-certificate-authority, value: /etc/kubernetes/pki/ca.crt }
   extraVolumes:
     - { name: audit-policy, hostPath: /etc/kubernetes/audit, mountPath: /etc/kubernetes/audit, readOnly: true, pathType: DirectoryOrCreate }
     - { name: audit-log, hostPath: /var/log/kubernetes/audit, mountPath: /var/log/kubernetes/audit, readOnly: false, pathType: DirectoryOrCreate }

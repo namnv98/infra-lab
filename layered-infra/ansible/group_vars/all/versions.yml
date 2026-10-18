@@ -9,6 +9,10 @@ helm_version: "v3.22.1"
 metallb_version: "0.16.1"
 gateway_api_version: "v1.6.1"          # đúng bản Cilium 1.20 hỗ trợ
 cert_manager_version: "v1.21.2"
+kubelet_csr_approver_version: "1.2.15"   # chart = app (duyệt chứng chỉ phục vụ của kubelet)
+metrics_server_chart_version: "3.14.0"   # metrics-server 0.9.0
+local_path_version: "v0.0.37"            # local-path-provisioner (StorageClass "standard")
+busybox_version: "1.37"                  # pod phụ của local-path (tạo/xoá thư mục volume)
 kube_bench_version: "v0.16.0"
 harbor_version: "v2.15.4"
 wazuh_version: "4.14.9"

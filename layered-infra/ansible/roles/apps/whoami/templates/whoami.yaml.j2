@@ -16,6 +16,11 @@ spec:
   template:
     metadata: { labels: { app: whoami } }
     spec:
+      topologySpreadConstraints:            # trải pod ra nhiều node khi có (mềm: 1 worker vẫn chạy được)
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector: { matchLabels: { app: whoami } }
       securityContext:                      # đã đạt chuẩn Pod Security "restricted"
         runAsNonRoot: true
         runAsUser: 65534
@@ -25,6 +30,8 @@ spec:
         image: {{ harbor_host }}/dockerhub/traefik/whoami:v1.11.0   # ghi rõ Harbor (policy restrict-image-registries)
         args: [--port=8080]
         ports: [{ containerPort: 8080 }]
+        readinessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 10 }
+        livenessProbe: { httpGet: { path: /health, port: 8080 }, periodSeconds: 20 }
         resources:
           requests: { cpu: 10m, memory: 16Mi }
           limits: { memory: 64Mi }
@@ -32,6 +39,26 @@ spec:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           capabilities: { drop: [ALL] }
+---
+# Nâng cấp/drain node: luôn còn ít nhất 1 pod phục vụ
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: whoami, namespace: demo }
+spec:
+  maxUnavailable: 1
+  selector: { matchLabels: { app: whoami } }
+---
+# Tự tăng/giảm số pod theo CPU (số liệu từ metrics-server)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: whoami, namespace: demo }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: whoami }
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+  - type: Resource
+    resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }
 ---
 apiVersion: v1
 kind: Service

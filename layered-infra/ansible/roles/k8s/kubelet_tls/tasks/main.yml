@@ -1,0 +1,48 @@
+# Kubelet dùng chứng chỉ phục vụ (cổng 10250) do CA của cluster ký thay vì tự ký → metrics-server và apiserver
+# kiểm chứng được kubelet, không cần --kubelet-insecure-tls. CSR được role k8s/kubelet_csr_approver duyệt.
+# Kèm: quyền file kubelet 600 (kube-bench 4.1.1, 4.1.9).
+- name: Cấu hình kubelet của cluster (ConfigMap kubelet-config) bật serverTLSBootstrap — kubeadm join/upgrade dùng lại
+  run_once: true
+  delegate_to: "{{ first_cp }}"
+  environment: { K8S_AUTH_KUBECONFIG: /etc/kubernetes/admin.conf }
+  block:
+    - name: Đọc ConfigMap kubelet-config
+      kubernetes.core.k8s_info: { kind: ConfigMap, namespace: kube-system, name: kubelet-config }
+      register: kubelet_cm
+
+    - name: Ghi serverTLSBootstrap vào ConfigMap
+      kubernetes.core.k8s:
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata: { name: kubelet-config, namespace: kube-system }
+          data:
+            kubelet: "{{ kubelet_cm.resources[0].data.kubelet | from_yaml | combine({'serverTLSBootstrap': true}) | to_nice_yaml(indent=2) }}"
+      when: not (kubelet_cm.resources[0].data.kubelet | from_yaml).serverTLSBootstrap | default(false)
+
+- name: Kubelet trên node bật serverTLSBootstrap
+  ansible.builtin.lineinfile:
+    path: /var/lib/kubelet/config.yaml
+    regexp: '^serverTLSBootstrap:'
+    line: 'serverTLSBootstrap: true'
+  notify: Khởi động lại kubelet
+
+- name: Quyền file kubelet 600 (kube-bench 4.1.1, 4.1.9)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    mode: "0600"
+  loop:
+    - /usr/lib/systemd/system/kubelet.service
+    - /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+    - /var/lib/kubelet/config.yaml
+
+- name: Áp dụng ngay (không đợi cuối play)
+  ansible.builtin.meta: flush_handlers
+
+- name: Chờ kubelet có chứng chỉ phục vụ do CA của cluster ký
+  ansible.builtin.shell: |
+    for i in $(seq 60); do
+      openssl x509 -in /var/lib/kubelet/pki/kubelet-server-current.pem -noout -issuer 2>/dev/null | grep -q 'CN *= *kubernetes' && exit 0
+      sleep 2
+    done; exit 1
+  changed_when: false

@@ -1,0 +1,37 @@
+# LimitRange (mặc định + trần cho từng container) và ResourceQuota (tổng cho namespace).
+- name: Namespace app (nhãn {{ kyverno_strict_label.key }}={{ kyverno_strict_label.value }})
+  kubernetes.core.k8s_info:
+    kind: Namespace
+    label_selectors: ["{{ kyverno_strict_label.key }}={{ kyverno_strict_label.value }}"]
+  register: app_ns
+
+- name: LimitRange cho namespace app + default
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: LimitRange
+      metadata: { name: container-defaults, namespace: "{{ item }}" }
+      spec:
+        limits:
+          - type: Container
+            defaultRequest: "{{ resource_default_request }}"
+            default: "{{ resource_default_limit }}"
+            max: "{{ resource_max_container }}"
+  loop: "{{ app_ns.resources | map(attribute='metadata.name') | list + ['default'] }}"
+
+- name: ResourceQuota cho namespace app
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata: { name: app-quota, namespace: "{{ item }}" }
+      spec: { hard: "{{ resource_quota_app }}" }
+  loop: "{{ app_ns.resources | map(attribute='metadata.name') | list }}"
+
+- name: ResourceQuota cho namespace default
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: ResourceQuota
+      metadata: { name: default-quota, namespace: default }
+      spec: { hard: "{{ resource_quota_default }}" }

@@ -11,12 +11,14 @@
     values:
       global:
         image: { registry: "{{ kyverno_image_registry }}" }
+      crds:
+        migration: { enabled: false }   # job hậu nâng cấp dùng image kyverno-cli không có trên ghcr.io; chỉ cần khi đổi phiên bản Kyverno
       admissionController:
         replicas: 1                     # lab: 1 bản; production ≥ 3 để webhook không thành điểm chết
         container:
           resources:
             requests: { cpu: 50m, memory: 128Mi }
-            limits: { memory: 384Mi }
+            limits: { memory: 256Mi }   # dùng thật ~110Mi
       backgroundController:
         enabled: false                  # không dùng policy generate / mutate-existing
       cleanupController:
@@ -25,10 +27,16 @@
         enabled: true                   # cần để xem kết quả Audit (PolicyReport)
         resources:
           requests: { cpu: 20m, memory: 64Mi }
-          limits: { memory: 256Mi }
+          limits: { memory: 160Mi }   # dùng thật ~60Mi
 
 - name: Policy chỉ cho chạy image từ Harbor
   kubernetes.core.k8s:
     template: restrict-image-registries.yaml.j2
+    wait: true
+    wait_condition: { type: Ready, status: "True" }
+
+- name: Policy chuẩn workload của app (requests/limits, cấm :latest, probe)
+  kubernetes.core.k8s:
+    template: app-workload-standards.yaml.j2
     wait: true
     wait_condition: { type: Ready, status: "True" }

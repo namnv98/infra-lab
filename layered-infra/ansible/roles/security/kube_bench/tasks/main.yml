@@ -67,3 +67,8 @@
     msg: "{{ item.item }}: {{ item.stdout_lines | select('search', 'checks (PASS|FAIL|WARN|INFO)') | list }}"
   loop: "{{ bench.results }}"
   loop_control: { label: "{{ item.item }}" }
+
+- name: FAIL ngoài danh sách ngoại lệ đã chấp nhận (kube_bench_accepted) — phải xử lý
+  ansible.builtin.debug:
+    msg: "{{ bench.results | map(attribute='stdout_lines') | flatten | select('match', '^\\[FAIL\\]')
+             | reject('search', '^\\[FAIL\\] (' ~ (kube_bench_accepted.keys() | map('regex_escape') | join('|')) ~ ') ') | list }}"

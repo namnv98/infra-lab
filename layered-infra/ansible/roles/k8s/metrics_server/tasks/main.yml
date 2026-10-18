@@ -1,0 +1,28 @@
+# metrics-server: số liệu CPU/RAM cho `kubectl top` và HPA. Làm đúng chuẩn, không tắt kiểm tra TLS:
+#   metrics-server → kubelet: kiểm bằng CA của cluster (kubelet có chứng chỉ phục vụ do CA ký — role k8s/kubelet_tls)
+#   apiserver → metrics-server: chứng chỉ do cert-manager (ClusterIssuer lab-ca) cấp, CA bơm vào APIService
+- name: Cài metrics-server (chart {{ metrics_server_chart_version }})
+  kubernetes.core.helm:
+    name: metrics-server
+    chart_ref: metrics-server
+    chart_repo_url: https://kubernetes-sigs.github.io/metrics-server/
+    chart_version: "{{ metrics_server_chart_version }}"
+    release_namespace: kube-system
+    wait: true
+    values:
+      apiService: { insecureSkipTLSVerify: false }
+      tls:
+        type: cert-manager
+        certManager:
+          existingIssuer: { enabled: true, kind: ClusterIssuer, name: lab-ca }
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits: { memory: 64Mi }    # dùng thật ~20Mi
+
+- name: Chờ API metrics trả số liệu node
+  ansible.builtin.command: kubectl top nodes
+  register: top
+  retries: 30
+  delay: 5
+  until: top.rc == 0
+  changed_when: false

@@ -8,3 +8,5 @@ kyverno_image_registry: ghcr.io
 kyverno_strict_label: { key: lab/policy, value: strict }
 # Registry Harbor đang proxy (namespace hệ thống: chỉ Audit, vì containerd đã kéo chúng qua Harbor)
 kyverno_proxied_registries: [docker.io, registry.k8s.io, ghcr.io, quay.io]
+# Chuẩn workload app (requests/limits, cấm :latest): Audit để xem vi phạm trước, rồi Enforce
+kyverno_app_standards_action: Enforce

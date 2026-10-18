@@ -1,0 +1,49 @@
+# StorageClass mặc định "standard" (local-path-provisioner). Lý do chọn: docs/thiet-ke-k8s-production.md mục B.
+- name: local-path-provisioner + StorageClass standard (mặc định)
+  kubernetes.core.k8s:
+    template: local-path.yaml.j2
+    wait: true
+
+- name: Thử tạo volume (PVC + pod ghi file), xong xoá
+  kubernetes.core.k8s:
+    definition:
+      - apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata: { name: storage-smoke, namespace: default }
+        spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 16Mi } } }
+      - apiVersion: v1
+        kind: Pod
+        metadata: { name: storage-smoke, namespace: default }
+        spec:
+          restartPolicy: Never
+          securityContext: { runAsNonRoot: true, runAsUser: 65534, seccompProfile: { type: RuntimeDefault } }
+          containers:
+            - name: w
+              image: docker.io/library/busybox:{{ busybox_version }}
+              command: [sh, -c, "echo ok > /data/f && cat /data/f"]
+              securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+              resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 32Mi } }
+              volumeMounts: [{ name: d, mountPath: /data }]
+          volumes: [{ name: d, persistentVolumeClaim: { claimName: storage-smoke } }]
+  changed_when: false
+
+- name: Chờ pod thử ghi xong
+  kubernetes.core.k8s_info: { kind: Pod, namespace: default, name: storage-smoke }
+  register: smoke
+  retries: 30
+  delay: 4
+  until: smoke.resources and smoke.resources[0].status.phase in ['Succeeded', 'Failed']
+
+- name: Xoá pod + PVC thử
+  kubernetes.core.k8s:
+    state: absent
+    wait: true
+    definition:
+      - { apiVersion: v1, kind: Pod, metadata: { name: storage-smoke, namespace: default } }
+      - { apiVersion: v1, kind: PersistentVolumeClaim, metadata: { name: storage-smoke, namespace: default } }
+  changed_when: false
+
+- name: Volume ghi/đọc được
+  ansible.builtin.assert:
+    that: smoke.resources[0].status.phase == 'Succeeded'
+    fail_msg: "Pod thử volume không chạy được — xem: kubectl -n local-path-storage logs deploy/local-path-provisioner"

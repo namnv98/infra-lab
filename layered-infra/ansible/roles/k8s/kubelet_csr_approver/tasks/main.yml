@@ -1,0 +1,19 @@
+# Duyệt tự động CSR "kubernetes.io/kubelet-serving": kubelet xin chứng chỉ phục vụ do CA của cluster ký (role k8s/kubelet_tls).
+# Chỉ duyệt khi tên node khớp danh sách node trong inventory và IP nằm trong dải LAN — CSR lạ bị từ chối.
+- name: Cài kubelet-csr-approver {{ kubelet_csr_approver_version }}
+  kubernetes.core.helm:
+    name: kubelet-csr-approver
+    chart_ref: kubelet-csr-approver
+    chart_repo_url: https://postfinance.github.io/kubelet-csr-approver
+    chart_version: "{{ kubelet_csr_approver_version }}"
+    release_namespace: kube-system
+    wait: true
+    values:
+      providerRegex: "^({{ groups['k8s'] | join('|') }})$"
+      providerIpPrefixes: ["{{ plan.zones.lan.cidr }}"]
+      bypassDnsResolution: true      # tên node không có trong DNS nội bộ; đã kiểm tên + IP ở trên
+      maxExpirationSeconds: "31622400"   # tối đa 366 ngày, kubelet tự xin lại trước khi hết hạn
+      replicas: 1                    # 1 worker: 2 bản cùng node không tăng sẵn sàng
+      resources:
+        requests: { cpu: 10m, memory: 32Mi }
+        limits: { memory: 64Mi }

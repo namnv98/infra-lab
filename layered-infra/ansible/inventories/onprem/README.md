@@ -58,4 +58,5 @@ ansible-playbook -i inventories/onprem/inventory.py site.yml --tags bootstrap,ne
 | 1 | Role `base/network`: nhánh IP tĩnh + gateway + VLAN theo `node_network_mode` | Hiện chỉ đổi DNS, giả định DHCP + route của VPC (GCP) |
 | 2 | Role `base/network`: NTP theo `ntp_client` (timesyncd) | Hiện ghi `/etc/chrony/chrony.conf` (image GCP dùng chrony) |
 | 3 | `lab.sh` (vpn, tunnel, browser…) đang gắn với GCP (`tofu output`) | Máy admin on-prem có thể ngồi trong LAN văn phòng |
-| 4 | HA firewall (CARP), DB zone, HSM… theo sơ đồ hệ thống thật | Ngoài phạm vi bản mẫu |
+| 4 | StorageClass `standard`: đổi local-path → Longhorn/Ceph (≥3 worker, dữ liệu nhân bản giữa node) — app không phải sửa | local-path chỉ hợp lab 1 worker |
+| 5 | HA firewall (CARP), DB zone, HSM… theo sơ đồ hệ thống thật | Ngoài phạm vi bản mẫu |

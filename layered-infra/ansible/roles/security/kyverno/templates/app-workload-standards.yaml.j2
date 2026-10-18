@@ -1,0 +1,58 @@
+# Chuẩn workload cho namespace app (nhãn {{ kyverno_strict_label.key }}={{ kyverno_strict_label.value }}) — docs/thiet-ke-k8s-production.md mục G.
+# Non-root, cấm privileged… do Pod Security "restricted" lo — không viết trùng ở đây.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: app-workload-standards
+  annotations:
+    policies.kyverno.io/title: Chuẩn workload của app
+    policies.kyverno.io/severity: medium
+spec:
+  background: true
+  rules:
+  - name: phai-co-requests-limits
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+          namespaceSelector:
+            matchLabels: { {{ kyverno_strict_label.key }}: "{{ kyverno_strict_label.value }}" }
+    validate:
+      failureAction: {{ kyverno_app_standards_action }}
+      message: "Container phải khai báo requests CPU/RAM và limit RAM (không thì 1 pod có thể chiếm hết node)."
+      pattern:
+        spec:
+          containers:
+          - resources:
+              requests: { cpu: "?*", memory: "?*" }
+              limits: { memory: "?*" }
+  - name: cam-tag-latest
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+          namespaceSelector:
+            matchLabels: { {{ kyverno_strict_label.key }}: "{{ kyverno_strict_label.value }}" }
+    validate:
+      failureAction: {{ kyverno_app_standards_action }}
+      message: "Image phải ghi phiên bản cụ thể, không dùng :latest hoặc bỏ trống tag (không biết đang chạy bản nào, không rollback được)."
+      pattern:
+        spec:
+          containers:
+          - image: "*:* & !*:latest"
+  - name: nen-co-readiness-probe
+    match:
+      any:
+      - resources:
+          kinds: [Deployment, StatefulSet]
+          namespaceSelector:
+            matchLabels: { {{ kyverno_strict_label.key }}: "{{ kyverno_strict_label.value }}" }
+    validate:
+      failureAction: Audit           # chỉ ghi nhận: job/worker không phục vụ request có thể không cần probe
+      message: "Nên có readinessProbe để Gateway không gửi request vào pod chưa sẵn sàng."
+      pattern:
+        spec:
+          template:
+            spec:
+              containers:
+              - readinessProbe: { periodSeconds: ">0" }   # có probe (API server tự điền periodSeconds)

@@ -1,4 +1,4 @@
-# Velero: backup tài nguyên K8s (manifest) ra kho S3 nội bộ. Cluster chưa có PV nên không chụp volume.
+# Velero: backup tài nguyên K8s (manifest) + dữ liệu volume (node-agent, sao lưu file-system bằng kopia) ra kho S3 nội bộ.
 # etcd snapshot (role backup/etcd) = cứu cả cluster; Velero = khôi phục từng namespace/app, chuyển sang cluster khác.
 - name: Cài Velero {{ velero_image_tag }} (chart {{ velero_chart_version }})
   kubernetes.core.helm:
@@ -10,6 +10,8 @@
     create_namespace: true
     wait: true
     values:
+      namespace:
+        labels: { pod-security.kubernetes.io/enforce: privileged }   # node-agent đọc volume của pod qua hostPath
       image: { repository: velero/velero, tag: "{{ velero_image_tag }}" }
       initContainers:
         - name: velero-plugin-for-aws
@@ -17,7 +19,11 @@
           volumeMounts: [{ mountPath: /target, name: plugins }]
       upgradeCRDs: false            # job này cần image kubectl ngoài; CRD đã nằm trong chart
       cleanUpCRDs: false
-      deployNodeAgent: false        # không có PV → không cần sao lưu dữ liệu volume
+      deployNodeAgent: true         # sao lưu dữ liệu PVC (StorageClass standard = thư mục trên node, không có snapshot)
+      nodeAgent:
+        resources:
+          requests: { cpu: 20m, memory: 64Mi }
+          limits: { memory: 192Mi }
       snapshotsEnabled: false
       credentials:
         useSecret: true
@@ -38,9 +44,10 @@
               s3Url: "{{ velero_s3_url }}"
               checksumAlgorithm: ""   # S3 tự host không hỗ trợ checksum CRC32 mới của AWS SDK
         volumeSnapshotLocation: []
+        defaultVolumesToFsBackup: true   # mọi volume của pod đều được sao lưu, không cần gắn annotation
       resources:
-        requests: { cpu: 50m, memory: 128Mi }
-        limits: { memory: 512Mi }
+        requests: { cpu: 50m, memory: 64Mi }
+        limits: { memory: 192Mi }   # dùng thật ~30Mi
       schedules:
         daily:
           disabled: false
@@ -51,6 +58,7 @@
             includedNamespaces: ["*"]
             excludedResources: [ciliumendpoints.cilium.io]   # Cilium tự tạo lại; giữ thì restore báo cảnh báo "đã tồn tại"
             snapshotVolumes: false
+            defaultVolumesToFsBackup: true
   no_log: true
 
 - name: Chờ kho backup sẵn sàng (BackupStorageLocation Available)

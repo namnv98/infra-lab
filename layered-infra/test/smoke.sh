@@ -39,7 +39,8 @@ if want web; then  # Internet → firewall biên → HAProxy + WAF → Gateway �
   check web "HTTP chuyển sang HTTPS"            301 "$(code "http://$WEB_IP/")"
   ME=$(curl -s --max-time 10 https://api.ipify.org)
   RIP=$(curl -s --max-time 10 "${C[@]}" "https://$APP/" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-real-ip"{print $2}')
-  check web "App thấy IP thật của client"       "$ME" "$RIP"
+  # mạng quán/văn phòng có thể ra Internet bằng nhiều IP liền nhau → so cùng dải /24
+  check web "App thấy IP thật của client (cùng /24)" "${ME%.*}" "${RIP%.*}"
   check web "SSH qua IP web bị chặn"            chặn "$(tcp "$WEB_IP" 22)"
 fi
 
@@ -72,6 +73,22 @@ if want cluster; then
   check cluster "Pod không Running/Completed"   0 "$BAD"
   check cluster "Node Ready"                    "$(kubectl get nodes --no-headers | wc -l)" "$(kubectl get nodes --no-headers | grep -cw Ready)"
   check cluster "Velero: kho backup sẵn sàng"   Available "$(kubectl -n velero get backupstoragelocation -o 'jsonpath={.items[0].status.phase}')"
+fi
+
+if want prod; then  # chuẩn production (docs/thiet-ke-k8s-production.md)
+  check prod "metrics-server: kubectl top đủ node"     "$(kubectl get nodes --no-headers | wc -l)" "$(kubectl top nodes --no-headers | wc -l)"
+  check prod "StorageClass mặc định"                    standard "$(kubectl get sc --no-headers | awk '/\(default\)/{print $1}')"
+  check prod "HPA whoami đọc được CPU"                  có "$(kubectl -n demo get hpa whoami -o jsonpath='{.status.currentMetrics[0].resource.current.averageUtilization}' | grep -q '[0-9]' && echo có || echo không)"
+  check prod "PDB whoami cho phép drain 1 pod"          1 "$(kubectl -n demo get pdb whoami -o jsonpath='{.status.disruptionsAllowed}')"
+  BAD='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"t","namespace":"demo"},"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"c","image":"harbor.lab.internal/dockerhub/library/busybox:latest","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+  check prod "Kyverno chặn image :latest ở app"         chặn "$(OUT=$(echo "$BAD" | $SSH "$MASTER" 'sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply --dry-run=server -f - 2>&1' 2>/dev/null); [[ $OUT == *cam-tag-latest* ]] && echo chặn || echo cho qua)"
+  WORKER=$(kubectl get nodes --no-headers -l '!node-role.kubernetes.io/control-plane' | awk 'NR==1{print $1}')
+  WLIM=$(kubectl describe node "$WORKER" | awk '/Allocated resources/{f=1} f && $1=="memory"{gsub(/[()%]/,"",$5); print $5; exit}')
+  check prod "Limit RAM worker không vượt RAM thật (≤100%)" có "$([[ ${WLIM:-999} -le 100 ]] && echo có || echo "không (${WLIM}%)")"
+  NS_NP=$(kubectl get cnp -A --no-headers | awk '$2=="baseline"' | wc -l)
+  check prod "Namespace có NetworkPolicy mặc định chặn"  9 "$NS_NP"
+  BENCH=$(grep -h '^\[FAIL\]' out/kube-bench-*.txt | grep -vE '^\[FAIL\] (1\.1\.12|4\.3\.1) ' | wc -l)
+  check prod "kube-bench: không FAIL ngoài ngoại lệ"    0 "$BENCH"
 fi
 
 if want siem; then  # log 2 firewall về Loki trên siem-01 (truy vấn từ container Grafana)

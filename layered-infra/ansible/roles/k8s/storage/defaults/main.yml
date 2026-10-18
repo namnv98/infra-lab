@@ -1,0 +1,1 @@
+local_path_dir: /var/lib/local-path   # thư mục chứa volume trên mỗi node

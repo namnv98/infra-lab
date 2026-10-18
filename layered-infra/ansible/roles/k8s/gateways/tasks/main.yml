@@ -1,0 +1,14 @@
+- name: Gateway public và internal
+  kubernetes.core.k8s:
+    template: gateways.yaml.j2
+
+- name: Chờ Gateway được cấp IP và sẵn sàng
+  kubernetes.core.k8s_info:
+    api_version: gateway.networking.k8s.io/v1
+    kind: Gateway
+    namespace: gateway
+    name: "{{ item }}"
+    wait: true
+    wait_condition: { type: Programmed, status: "True" }
+    wait_timeout: 300
+  loop: "{{ gateways.keys() | list }}"

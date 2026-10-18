@@ -1,0 +1,40 @@
+# Tắt các thứ Ubuntu tự gọi ra Internet (tin tức motd, tin tức apt)
+- name: Tắt motd-news
+  ansible.builtin.lineinfile: { path: /etc/default/motd-news, regexp: '^ENABLED=', line: 'ENABLED=0', create: true, mode: "0644" }
+
+- name: Tắt timer motd-news
+  ansible.builtin.systemd_service: { name: motd-news.timer, enabled: false, state: stopped }
+  failed_when: false
+
+- name: Tắt tin tức của apt (Ubuntu Pro)
+  ansible.builtin.command: pro config set apt_news=false
+  changed_when: false
+  failed_when: false
+
+# snapd tự cập nhật snap (image GCP cài sẵn google-cloud-cli dạng snap) → gọi api.snapcraft.io liên tục.
+# Server không ra Internet nên bị OPNsense chặn hàng trăm lần/5 phút → nhiễu SIEM, bắn cảnh báo "máy nội bộ bị chặn liên tục".
+# Server không cần snap nào: tắt và mask snapd (giống hardening thường làm: gỡ snapd khỏi server).
+- name: Tắt snapd (không dùng snap trên server, tránh gọi ra snap store)
+  ansible.builtin.systemd_service: { name: "{{ item }}", enabled: false, state: stopped, masked: true }
+  loop: [snapd.service, snapd.socket, snapd.seeded.service]
+  failed_when: false
+
+# Agent của Google trên image GCP gọi *.googleapis.com — server không ra Internet nên bị chặn liên tục (nhiễu SIEM).
+# OS Config (vá OS qua GCP): lab không dùng → tắt hẳn. Guest agent: GIỮ (nạp khoá SSH từ metadata), chỉ tắt đẩy log lên Cloud Logging.
+- name: Tắt google-osconfig-agent (không dùng OS Config của GCP)
+  ansible.builtin.systemd_service: { name: google-osconfig-agent, enabled: false, state: stopped, masked: true }
+  failed_when: false
+
+- name: Guest agent không đẩy log lên Cloud Logging
+  community.general.ini_file:
+    path: /etc/default/instance_configs.cfg
+    section: Core
+    option: cloud_logging_enabled
+    value: "false"
+    mode: "0644"
+  register: guest_cfg
+
+- name: Nạp lại guest agent
+  ansible.builtin.systemd_service: { name: google-guest-agent, state: restarted }
+  when: guest_cfg is changed
+  failed_when: false

@@ -1,0 +1,44 @@
+- name: Cài containerd (bản 2.x của Ubuntu 24.04)
+  ansible.builtin.apt:
+    name: containerd
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Tạo file cấu hình mặc định nếu chưa có
+  ansible.builtin.shell: mkdir -p /etc/containerd && containerd config default > /etc/containerd/config.toml
+  args:
+    creates: /etc/containerd/config.toml
+  notify: Restart containerd
+
+- name: Dùng systemd quản lý cgroup (phải khớp với kubelet, nếu không Pod sẽ bị restart liên tục)
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: 'SystemdCgroup = false'
+    replace: 'SystemdCgroup = true'
+  notify: Restart containerd
+
+# containerd 2.x kéo image cho kubelet qua Transfer Service; mirror (certs.d/hosts.toml) chỉ có hiệu lực
+# khi config_path của transfer.v1.local được đặt. Thiếu dòng này, containerd bỏ qua Harbor và gọi thẳng registry.
+- name: Bật thư mục mirror cho Transfer Service
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: "(\\[plugins.'io.containerd.transfer.v1.local'\\](?:\\n(?!\\s*\\[).*)*?\\n\\s*config_path = )''"
+    replace: "\\1'/etc/containerd/certs.d'"
+  notify: Restart containerd
+
+# Transfer Service chỉ nhận MỘT thư mục: chuỗi "a:b" bị coi là một đường dẫn không tồn tại → mirror bị bỏ qua
+- name: config_path chỉ trỏ một thư mục
+  ansible.builtin.replace:
+    path: /etc/containerd/config.toml
+    regexp: "config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'"
+    replace: "config_path = '/etc/containerd/certs.d'"
+  notify: Restart containerd
+
+- name: Bật containerd
+  ansible.builtin.systemd_service:
+    name: containerd
+    enabled: true
+    state: started
+
+- name: Áp dụng cấu hình ngay (trước khi kubeadm chạy)
+  ansible.builtin.meta: flush_handlers

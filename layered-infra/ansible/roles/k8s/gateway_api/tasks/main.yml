@@ -1,0 +1,37 @@
+- name: Tải CRD Gateway API {{ gateway_api_version }} (kênh standard)
+  ansible.builtin.get_url:
+    url: "https://github.com/kubernetes-sigs/gateway-api/releases/download/{{ gateway_api_version }}/standard-install.yaml"
+    dest: /root/gateway-api-{{ gateway_api_version }}.yaml
+    mode: "0644"
+
+- name: Cài CRD Gateway API
+  kubernetes.core.k8s:
+    src: /root/gateway-api-{{ gateway_api_version }}.yaml
+    apply: true
+    server_side_apply: { field_manager: ansible }
+
+- name: Cilium đã bật Gateway API chưa
+  ansible.builtin.command: kubectl -n kube-system get cm cilium-config -o jsonpath={.data.enable-gateway-api}
+  register: cilium_gw
+  changed_when: false
+
+# CRD phải có trước, Cilium operator chỉ nhận ra Gateway API khi khởi động
+- name: Bật Gateway API trong Cilium (dùng Envoy có sẵn trên mỗi node)
+  ansible.builtin.command: cilium upgrade --reuse-values --set gatewayAPI.enabled=true
+  when: cilium_gw.stdout != 'true'
+
+- name: Khởi động lại Cilium để nhận cấu hình mới
+  ansible.builtin.shell: |
+    kubectl -n kube-system rollout restart deploy/cilium-operator ds/cilium
+    kubectl -n kube-system rollout status deploy/cilium-operator --timeout=300s
+    kubectl -n kube-system rollout status ds/cilium --timeout=300s
+  when: cilium_gw.stdout != 'true'
+
+- name: Chờ GatewayClass "cilium" sẵn sàng
+  kubernetes.core.k8s_info:
+    api_version: gateway.networking.k8s.io/v1
+    kind: GatewayClass
+    name: cilium
+    wait: true
+    wait_condition: { type: Accepted, status: "True" }
+    wait_timeout: 180

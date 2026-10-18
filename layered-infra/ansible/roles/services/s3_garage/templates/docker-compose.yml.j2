@@ -1,0 +1,11 @@
+# Do Ansible quản lý (role services/s3_garage)
+services:
+  garage:
+    image: {{ garage_image }}
+    container_name: garage
+    restart: unless-stopped
+    ports: ["{{ garage_s3_port }}:3900"]     # chỉ API S3; RPC/admin không mở ra ngoài
+    volumes:
+      - {{ garage_dir }}/garage.toml:/etc/garage.toml:ro
+      - {{ garage_dir }}/meta:/var/lib/garage/meta
+      - {{ garage_dir }}/data:/var/lib/garage/data

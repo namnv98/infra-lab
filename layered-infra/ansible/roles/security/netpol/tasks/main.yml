@@ -1,0 +1,3 @@
+- name: NetworkPolicy cho namespace demo
+  kubernetes.core.k8s:
+    template: demo-netpol.yaml.j2

@@ -1,0 +1,36 @@
+# Wazuh agent (~40MB RAM): FIM, rootcheck, phân tích log; gửi về manager trên siem-01.
+- name: Repo apt chính thức của Wazuh
+  ansible.builtin.deb822_repository:
+    name: wazuh
+    uris: https://packages.wazuh.com/4.x/apt/
+    suites: stable
+    components: main
+    signed_by: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+
+- name: Cài wazuh-agent {{ wazuh_version }} (đăng ký với siem-01 ngay khi cài)
+  ansible.builtin.apt:
+    name: "wazuh-agent={{ wazuh_version }}-1"
+    update_cache: true
+  environment:
+    WAZUH_MANAGER: "{{ mon_ip }}"
+    WAZUH_MANAGER_PORT: "{{ wazuh_agent_port | string }}"
+    WAZUH_REGISTRATION_SERVER: "{{ mon_ip }}"
+    WAZUH_AGENT_NAME: "{{ inventory_hostname }}"
+
+- name: Giữ phiên bản agent (phải khớp manager)
+  ansible.builtin.dpkg_selections: { name: wazuh-agent, selection: hold }
+
+- name: Agent đọc thêm audit log của auditd
+  ansible.builtin.blockinfile:
+    path: /var/ossec/etc/ossec.conf
+    marker: "<!-- {mark} lab: auditd -->"
+    insertbefore: "</ossec_config>"
+    block: |
+      <localfile>
+        <log_format>audit</log_format>
+        <location>/var/log/audit/audit.log</location>
+      </localfile>
+  notify: Restart wazuh-agent
+
+- name: Bật agent
+  ansible.builtin.systemd_service: { name: wazuh-agent, enabled: true, state: started }

@@ -1,0 +1,1 @@
+zone_fw: "{{ plan.zones.dmz.fw }}"     # firewall làm gateway của vùng DMZ (plan.yml): DNS, NTP

@@ -1,0 +1,8 @@
+# Đặc thù nền tảng GCP (on-prem: inventories/onprem/group_vars/all/platform.yml)
+node_interface: ens4                   # card mạng chính của VM trên GCP (KVM local: enp1s0)
+
+tofu_dir: "{{ lab_root }}/tofu/envs/gcp"   # OpenTofu của môi trường này
+# GCP project/zone + IP public: đọc từ tofu (một nguồn duy nhất), chỉ dùng khi bootstrap firewall
+gcp_project: "{{ lookup('ansible.builtin.ini', 'project_id', file=tofu_dir ~ '/terraform.tfvars', type='properties') | replace('\"', '') }}"
+gcp_zone: "{{ lookup('ansible.builtin.ini', 'zone', file=tofu_dir ~ '/terraform.tfvars', type='properties') | replace('\"', '') }}"
+fw_public_ip: "{{ lookup('ansible.builtin.pipe', 'tofu -chdir=' ~ tofu_dir ~ ' output -raw fw_public_ip') }}"   # IP web của biên

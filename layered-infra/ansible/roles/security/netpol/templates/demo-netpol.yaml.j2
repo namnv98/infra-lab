@@ -1,0 +1,31 @@
+# 1) Mặc định chặn mọi traffic vào/ra mọi Pod trong namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny-all, namespace: demo }
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# 2) Cho phép hỏi DNS (CoreDNS), thiếu cái này mọi tên miền đều không phân giải được
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-dns, namespace: demo }
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+  - to:
+    - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+      podSelector: { matchLabels: { k8s-app: kube-dns } }
+    ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+---
+# 3) whoami chỉ nhận traffic từ Envoy của Gateway (identity "ingress"); WAF nằm ở vùng biên (edge-01), trước Gateway public.
+#    NetworkPolicy chuẩn không chọn được identity "ingress" nên dùng CiliumNetworkPolicy.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata: { name: whoami-from-gateway, namespace: demo }
+spec:
+  endpointSelector: { matchLabels: { app: whoami } }
+  ingress:
+  - fromEntities: [ingress]
+    toPorts: [{ ports: [{ port: "8080", protocol: TCP }] }]

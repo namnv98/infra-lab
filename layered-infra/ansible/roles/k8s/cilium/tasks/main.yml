@@ -1,0 +1,25 @@
+- name: Cài cilium CLI {{ cilium_cli_version }}
+  ansible.builtin.unarchive:
+    src: "https://github.com/cilium/cilium-cli/releases/download/{{ cilium_cli_version }}/cilium-linux-amd64.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    creates: /usr/local/bin/cilium
+
+- name: Kiểm tra Cilium đã cài chưa
+  ansible.builtin.command: kubectl -n kube-system get daemonset cilium
+  environment: { KUBECONFIG: /etc/kubernetes/admin.conf }
+  register: cilium_ds
+  failed_when: false
+  changed_when: false
+
+- name: Cài Cilium {{ cilium_version }} (CNI + thay thế kube-proxy bằng eBPF, API qua VIP, chỉ dùng card {{ node_interface }})
+  ansible.builtin.command: >
+    cilium install --version {{ cilium_version }}
+    --set kubeProxyReplacement=true
+    --set k8sServiceHost={{ api_endpoint }}
+    --set k8sServicePort=6443
+    --set devices={{ node_interface }}
+    --set ipam.mode=kubernetes
+    --set operator.replicas=1
+  environment: { KUBECONFIG: /etc/kubernetes/admin.conf }
+  when: cilium_ds.rc != 0

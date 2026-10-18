@@ -1,0 +1,167 @@
+# Phần cấu hình OPNsense chạy qua VPN (sau bootstrap)
+# ---------- Port forward ----------
+- name: Port forward đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/d_nat/search_rule", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: dnat
+  when: opn_role == "edge"   # chỉ biên có IP public
+
+- name: Port forward WAN → HAProxy trong DMZ (kèm luật pass tự động)
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/d_nat/add_rule"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      rule: { interface: wan, ipprotocol: inet, protocol: tcp, destination: { network: wanip, port: "{{ item }}" }, target: haproxy_dmz, local-port: "{{ item }}", pass: pass, descr: "WAN:{{ item }} → HAProxy DMZ" }
+  loop: ["80", "443"]
+  when:
+    - opn_role == "edge"
+    - ("WAN:" ~ item ~ " → HAProxy DMZ") not in (dnat.json.rows | map(attribute='descr'))
+  register: dnat_add
+  changed_when: true
+  failed_when: dnat_add.json.result | default('') != 'saved'
+
+# ---------- Source NAT ở biên (hybrid: luật tự động + opn_snat_rules) ----------
+- name: Source NAT — chế độ hiện tại
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/source_nat/get", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: snat_cfg
+  when: opn_role == "edge"
+
+- name: Source NAT — chuyển sang hybrid
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/source_nat/set"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: { filter: { general: { snat_mode: hybrid } } }
+  when:
+    - opn_role == "edge"
+    - (snat_cfg.json.filter.general.snat_mode | dict2items | selectattr('value.selected', 'equalto', 1) | map(attribute='key') | first) != 'hybrid'
+  register: snat_mode
+  changed_when: true
+  failed_when: snat_mode.json.result | default('') != 'saved'
+
+- name: Source NAT — luật đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/source_nat/search_rule", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: snat_rules
+  when: opn_role == "edge"
+
+- name: Source NAT — thêm luật cho mạng sau core
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/source_nat/add_rule"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      rule: { enabled: "1", interface: wan, ipprotocol: inet, protocol: any, source_net: "{{ item.source_net }}", destination_net: any, target: wanip, description: "{{ item.description }}" }
+  loop: "{{ opn_snat_rules | default([]) if opn_role == 'edge' else [] }}"
+  loop_control: { label: "{{ item.description }}" }
+  when: item.description not in (snat_rules.json.rows | map(attribute='description'))
+  register: snat_add
+  changed_when: true
+  failed_when: snat_add.json.result | default('') != 'saved'
+
+- name: Source NAT — áp dụng
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/source_nat/apply", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  when: snat_mode is changed or snat_add is changed
+
+- name: Áp dụng luật firewall và NAT
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/{{ item }}/apply", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  loop: [filter, d_nat]
+  when: rule_add is changed or rule_set is changed or rule_toggle is changed or rule_del is changed or dnat_add is changed
+
+# ---------- DNS nội bộ (Unbound) ----------
+# Chỉ core giữ tên nội bộ: biên (phục vụ DMZ) không biết tên nào trong lab.internal → DMZ không dò được mạng trong
+- name: Host override đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/unbound/settings/search_host_override", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: overrides
+  when: opn_role == "core"
+
+- name: Thêm bản ghi DNS nội bộ <tên>.{{ lab_domain }}
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/unbound/settings/add_host_override"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      host: { enabled: "1", hostname: "{{ item.hostname }}", domain: "{{ item.domain | default(lab_domain) }}", rr: A, server: "{{ item.ip }}", description: "{{ item.description }}" }
+  loop: "{{ opn_host_overrides if opn_role == 'core' else [] }}"
+  loop_control: { label: "{{ item.hostname }}.{{ item.domain | default(lab_domain) }}" }
+  when: item.hostname not in (overrides.json.rows | map(attribute='hostname'))
+  register: ovr_add
+  changed_when: true
+  failed_when: ovr_add.json.result | default('') != 'saved'
+
+- name: Áp dụng DNS
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/unbound/service/reconfigure", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  when: ovr_add is changed
+
+# Unbound từ chối cấu hình sai (vd. hostname "*") bằng cách DỪNG HẲN → DNS cả lab chết. Kiểm tra ngay, lỗi thì dừng playbook.
+- name: Unbound phải còn chạy sau khi áp dụng
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/unbound/service/status", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: unbound_status
+  retries: 10
+  delay: 3
+  until: unbound_status.json.status | default('') == 'running'
+  when: ovr_add is changed
+
+# ---------- Gửi syslog về siem-01 (VLAN MGMT) ----------
+- name: Đích syslog đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/syslog/settings/search_destinations", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: dests
+
+- name: Gửi mọi log (firewall, hệ thống) về siem-01 qua TCP, chuẩn RFC5424
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/syslog/settings/add_destination"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      destination: { enabled: "1", transport: tcp4, hostname: "{{ mon_ip }}", port: "{{ mon_syslog_port | string }}", rfc5424: "1", description: "siem-01 (Loki)" }
+  when: (dests.json.rows | selectattr('description', 'equalto', 'siem-01 (Loki)') | list | length) == 0
+  register: dest_add
+  changed_when: true
+  failed_when: dest_add.json.result | default('') != 'saved'
+
+- name: Áp dụng syslog
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/syslog/service/reconfigure", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  when: dest_add is changed
+
+# ---------- Xoá luật TẠM của bootstrap (API qua WAN) khi đã quản trị được qua VPN ----------
+- name: Luật bootstrap còn sót
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/filter/search_rule", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: rules_boot
+
+- name: Xoá luật BOOTSTRAP (từ giờ WAN chỉ mở web + WireGuard)
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/filter/del_rule/{{ item.uuid }}"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+  loop: "{{ rules_boot.json.rows | selectattr('description', 'match', 'BOOTSTRAP') | list }}"
+  loop_control: { label: "{{ item.description }}" }
+  register: boot_del
+  changed_when: true
+
+- name: Áp dụng sau khi xoá luật bootstrap
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/filter/apply", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  when: boot_del is changed

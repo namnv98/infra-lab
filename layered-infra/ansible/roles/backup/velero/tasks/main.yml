@@ -1,0 +1,65 @@
+# Velero: backup tài nguyên K8s (manifest) ra kho S3 nội bộ. Cluster chưa có PV nên không chụp volume.
+# etcd snapshot (role backup/etcd) = cứu cả cluster; Velero = khôi phục từng namespace/app, chuyển sang cluster khác.
+- name: Cài Velero {{ velero_image_tag }} (chart {{ velero_chart_version }})
+  kubernetes.core.helm:
+    name: velero
+    chart_ref: velero
+    chart_repo_url: https://vmware-tanzu.github.io/helm-charts
+    chart_version: "{{ velero_chart_version }}"
+    release_namespace: velero
+    create_namespace: true
+    wait: true
+    values:
+      image: { repository: velero/velero, tag: "{{ velero_image_tag }}" }
+      initContainers:
+        - name: velero-plugin-for-aws
+          image: "{{ velero_aws_plugin }}"
+          volumeMounts: [{ mountPath: /target, name: plugins }]
+      upgradeCRDs: false            # job này cần image kubectl ngoài; CRD đã nằm trong chart
+      cleanUpCRDs: false
+      deployNodeAgent: false        # không có PV → không cần sao lưu dữ liệu volume
+      snapshotsEnabled: false
+      credentials:
+        useSecret: true
+        secretContents:
+          cloud: |
+            [default]
+            aws_access_key_id={{ velero_s3_key_id }}
+            aws_secret_access_key={{ velero_s3_secret }}
+      configuration:
+        backupStorageLocation:
+          - name: default
+            provider: aws
+            bucket: velero
+            default: true
+            config:
+              region: garage
+              s3ForcePathStyle: "true"
+              s3Url: "{{ velero_s3_url }}"
+              checksumAlgorithm: ""   # S3 tự host không hỗ trợ checksum CRC32 mới của AWS SDK
+        volumeSnapshotLocation: []
+      resources:
+        requests: { cpu: 50m, memory: 128Mi }
+        limits: { memory: 512Mi }
+      schedules:
+        daily:
+          disabled: false
+          schedule: "{{ velero_schedule }}"
+          useOwnerReferencesInBackup: false
+          template:
+            ttl: "{{ velero_ttl }}"
+            includedNamespaces: ["*"]
+            excludedResources: [ciliumendpoints.cilium.io]   # Cilium tự tạo lại; giữ thì restore báo cảnh báo "đã tồn tại"
+            snapshotVolumes: false
+  no_log: true
+
+- name: Chờ kho backup sẵn sàng (BackupStorageLocation Available)
+  kubernetes.core.k8s_info:
+    api_version: velero.io/v1
+    kind: BackupStorageLocation
+    namespace: velero
+    name: default
+  register: bsl
+  until: bsl.resources | length > 0 and (bsl.resources[0].status | default({})).phase | default('') == 'Available'
+  retries: 30
+  delay: 5

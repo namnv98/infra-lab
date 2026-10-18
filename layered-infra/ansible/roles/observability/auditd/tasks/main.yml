@@ -1,0 +1,38 @@
+- name: Cài auditd + plugin đẩy sang syslog
+  ansible.builtin.apt:
+    name: [auditd, audispd-plugins]
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Lấy uid của user dịch vụ cần theo dõi
+  ansible.builtin.command: "id -u {{ item }}"
+  loop: "{{ audit_service_users | default([]) }}"
+  register: uids
+  changed_when: false
+
+- name: Ghi nhận uid
+  ansible.builtin.set_fact:
+    service_uids: "{{ uids.results | map(attribute='stdout') | list }}"
+
+- name: Luật audit
+  ansible.builtin.template:
+    src: 50-lab.rules.j2
+    dest: /etc/audit/rules.d/50-lab.rules
+    mode: "0640"
+  notify: Nạp luật audit
+
+- name: Bật plugin audisp-syslog (sự kiện audit → syslog → rsyslog → siem-01)
+  ansible.builtin.lineinfile:
+    path: /etc/audit/plugins.d/syslog.conf
+    regexp: "^{{ item.k }} ="
+    line: "{{ item.k }} = {{ item.v }}"
+  loop:
+    - { k: active, v: "yes" }
+    - { k: args, v: "LOG_INFO LOG_LOCAL6" }
+  notify: Khởi động lại auditd
+
+- name: Bật auditd
+  ansible.builtin.systemd_service: { name: auditd, enabled: true, state: started }
+
+- name: Áp dụng ngay
+  ansible.builtin.meta: flush_handlers

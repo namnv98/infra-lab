@@ -1,0 +1,4 @@
+- name: Join vào cluster qua VIP (chỉ chạy khi node chưa join, tức chưa có kubelet.conf)
+  ansible.builtin.command: "{{ hostvars[first_cp].join_command }} --node-name {{ inventory_hostname }}"
+  args:
+    creates: /etc/kubernetes/kubelet.conf

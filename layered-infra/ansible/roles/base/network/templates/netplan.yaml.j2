@@ -1,0 +1,10 @@
+# Do Ansible quản lý (role base/network). cloud-init không còn ghi đè file này.
+# GCP: IP và route vẫn lấy qua DHCP của VPC (route 0.0.0.0/0 của VPC đã trỏ vào OPNsense),
+# chỉ thay DNS bằng Unbound của OPNsense {{ zone_fw }} (thay DNS của Google 169.254.169.254).
+network:
+  version: 2
+  ethernets:
+    {{ node_interface }}:
+      dhcp4: true
+      dhcp4-overrides: { use-dns: false, use-domains: false }
+      nameservers: { addresses: [{{ zone_fw }}], search: [{{ lab_domain }}] }

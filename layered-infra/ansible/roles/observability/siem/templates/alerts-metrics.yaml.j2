@@ -1,0 +1,55 @@
+# Luật cảnh báo theo SỐ LIỆU (Prometheus trong cluster): cùng nơi gửi email với luật SIEM (Loki).
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: lab-metrics
+    folder: Metrics
+    interval: 1m
+    rules:
+{% set rules = [
+  {"uid": "node-down", "sev": "critical", "for": "2m",
+   "title": "Node K8s mất liên lạc (node-exporter không trả lời)",
+   "expr": 'count(up{job="node-exporter"} == 0) or vector(0)', "threshold": 0,
+   "summary": "Prometheus không lấy được số liệu từ một node: máy tắt, treo, hoặc mạng hỏng."},
+  {"uid": "node-notready", "sev": "critical", "for": "2m",
+   "title": "Node K8s NotReady",
+   "expr": 'count(kube_node_status_condition{condition="Ready",status="true"} == 0) or vector(0)', "threshold": 0,
+   "summary": "kubelet báo node không sẵn sàng: Pod trên node sẽ bị dời đi."},
+  {"uid": "node-mem", "sev": "warning", "for": "5m",
+   "title": "RAM node dùng trên 90%",
+   "expr": 'max(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100', "threshold": 90,
+   "summary": "Sắp hết RAM: Pod có thể bị OOMKill. Xem dashboard Node Exporter Full."},
+  {"uid": "node-disk", "sev": "warning", "for": "5m",
+   "title": "Ổ đĩa node dùng trên 85%",
+   "expr": 'max(1 - node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"}) * 100', "threshold": 85,
+   "summary": "Đầy đĩa làm kubelet đuổi Pod (eviction) và containerd không kéo được image."},
+  {"uid": "pod-restart", "sev": "warning", "for": "0s",
+   "title": "Pod khởi động lại liên tục (CrashLoop)",
+   "expr": 'max(increase(kube_pod_container_status_restarts_total[15m])) or vector(0)', "threshold": 3,
+   "summary": "Một container khởi động lại hơn 3 lần trong 15 phút."},
+] %}
+{% for r in rules %}
+      - uid: {{ r.uid }}
+        title: "{{ r.title }}"
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange: { from: 600, to: 0 }
+            datasourceUid: prometheus
+            model: { refId: A, expr: '{{ r.expr }}', instant: true }
+          - refId: B
+            datasourceUid: __expr__
+            model: { refId: B, type: reduce, expression: A, reducer: last }
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions: [{ evaluator: { type: gt, params: [{{ r.threshold }}] } }]
+        noDataState: OK
+        execErrState: Error
+        for: {{ r.for }}
+        labels: { severity: {{ r.sev }} }
+        annotations: { summary: "{{ r.summary }}" }
+{% endfor %}

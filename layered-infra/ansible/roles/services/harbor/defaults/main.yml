@@ -1,0 +1,1 @@
+harbor_apps_project: apps        # project cho image tự build: quét khi push, chặn image Critical

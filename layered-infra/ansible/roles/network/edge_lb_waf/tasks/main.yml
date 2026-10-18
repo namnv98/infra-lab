@@ -1,0 +1,78 @@
+# Vùng biên trong DMZ: HAProxy (LB, giải mã TLS) + WAF (ModSecurity v3 + OWASP CRS v4) — giống cặp LB/WAF ở vùng biên.
+#   Internet → firewall-edge-01 (port forward) → HAProxy :443 (cert edge) → WAF 127.0.0.1:8080 → HAProxy 127.0.0.1:8081 → Gateway public (TLS, kiểm cert lab-ca)
+# Cert edge do cert-manager trong cluster cấp, play trước (50-apps-edge.yml) đọc ra và truyền vào biến edge_tls.
+- name: "Cài HAProxy + Docker (DMZ ra Internet 80/443 trực tiếp, luật #10 biên)"
+  ansible.builtin.apt:
+    name: [haproxy, docker.io]
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Thư mục cert của HAProxy
+  ansible.builtin.file:
+    path: /etc/haproxy/certs
+    state: directory
+    owner: root
+    group: haproxy
+    mode: "0750"
+
+- name: Cert edge (*.{{ gateways.public.domain }}) = cert + key trong 1 file
+  ansible.builtin.copy:
+    dest: /etc/haproxy/certs/edge.pem
+    content: "{{ edge_tls.crt }}{{ edge_tls.key }}"
+    owner: root
+    group: haproxy
+    mode: "0640"
+  no_log: true
+  notify: Reload haproxy
+
+- name: CA của lab (HAProxy kiểm cert của Gateway public khi mã hoá lại)
+  ansible.builtin.copy:
+    src: "{{ lab_ca_local }}"
+    dest: /etc/haproxy/certs/lab-ca.crt
+    mode: "0644"
+  notify: Reload haproxy
+
+- name: Kéo image WAF từ Docker Hub (DMZ không vào được Harbor trong LAN)
+  ansible.builtin.command: docker pull -q docker.io/{{ waf_image }}
+  register: waf_pull
+  changed_when: false
+  retries: 5
+  delay: 10
+  until: waf_pull.rc == 0
+
+- name: Service WAF (container, mạng host, chỉ HAProxy gọi tới)
+  ansible.builtin.template:
+    src: waf.service.j2
+    dest: /etc/systemd/system/waf.service
+    mode: "0644"
+  register: waf_unit
+
+- name: Chạy WAF
+  ansible.builtin.systemd_service:
+    name: waf
+    enabled: true
+    state: "{{ 'restarted' if waf_unit is changed else 'started' }}"
+    daemon_reload: "{{ waf_unit is changed }}"
+
+- name: Cấu hình HAProxy (TLS ở biên → WAF → Gateway public)
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    mode: "0644"
+    validate: haproxy -c -f %s
+  notify: Reload haproxy
+
+- name: Bật HAProxy
+  ansible.builtin.systemd_service:
+    name: haproxy
+    enabled: true
+    state: started
+
+- name: Chờ WAF sẵn sàng (/healthz)
+  ansible.builtin.uri:
+    url: http://127.0.0.1:{{ waf_port }}/healthz
+    headers: { Host: waf.local }
+  register: waf_health
+  retries: 30
+  delay: 3
+  until: waf_health.status == 200

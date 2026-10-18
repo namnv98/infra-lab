@@ -1,0 +1,12 @@
+# Bản sao log ngoài siem-01: chỉ nhận ghi từ siem-01 (luật DOCKER-USER), giữ {{ log_archive_retention }}.
+services:
+  loki:
+    image: {{ mon_images.loki }}
+    command: -config.file=/etc/loki/loki.yaml
+    volumes:
+      - ./loki.yaml:/etc/loki/loki.yaml:ro
+      - ./data:/loki
+    ports:
+      - "{{ svc_ip }}:3100:3100"
+    restart: unless-stopped
+    mem_limit: 384m

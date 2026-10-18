@@ -1,0 +1,27 @@
+# Audit policy: ghi "ai làm gì với API". Luật đầu tiên khớp sẽ được áp dụng.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+omitStages: [RequestReceived]
+rules:
+  # --- Bỏ qua log rác (rất nhiều, không có giá trị điều tra) ---
+  - level: None
+    nonResourceURLs: ["/healthz*", "/readyz*", "/livez*", "/version", "/metrics"]
+  - level: None
+    resources: [{ group: "", resources: ["events"] }]
+  - level: None
+    resources: [{ group: "coordination.k8s.io", resources: ["leases"] }]   # kube-vip, leader election
+  - level: None
+    verbs: ["watch"]
+  # --- KHÔNG BAO GIỜ ghi nội dung Secret / token ---
+  - level: Metadata
+    resources:
+      - { group: "", resources: ["secrets", "serviceaccounts/token"] }
+      - { group: "authentication.k8s.io", resources: ["tokenreviews"] }
+  # --- Hành động nhạy cảm: exec/attach/port-forward vào Pod ---
+  - level: Metadata
+    resources: [{ group: "", resources: ["pods/exec", "pods/attach", "pods/portforward"] }]
+  # --- Mọi thay đổi: ghi cả nội dung request (ai tạo/sửa/xoá cái gì) ---
+  - level: Request
+    verbs: ["create", "update", "patch", "delete", "deletecollection"]
+  # --- Còn lại (đọc): chỉ ghi metadata ---
+  - level: Metadata

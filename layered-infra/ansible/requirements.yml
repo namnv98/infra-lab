@@ -1,0 +1,7 @@
+# Ghim đúng bản đang chạy — nâng cấp: đổi version, chạy `ansible-galaxy collection install -r requirements.yml --force`, dựng thử
+collections:
+  - { name: ansible.posix, version: "2.2.2" }
+  - { name: community.general, version: "13.3.0" }
+  - { name: kubernetes.core, version: "6.5.0" }
+  - { name: ansible.utils, version: "6.1.0" }
+  - { name: community.crypto, version: "3.3.0" }

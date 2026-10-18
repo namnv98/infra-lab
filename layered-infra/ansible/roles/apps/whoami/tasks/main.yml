@@ -1,0 +1,4 @@
+- name: App whoami, mở qua cả 2 Gateway
+  kubernetes.core.k8s:
+    template: whoami.yaml.j2
+    wait: true

@@ -1,0 +1,5 @@
+# User dịch vụ mà auditd theo dõi: user này chạy bất kỳ chương trình nào = dấu hiệu bị chiếm
+audit_service_users: [haproxy]
+
+# DMZ không vào được LAN (luật #30) nên không dùng Squid; edge-01 ra Internet 80/443 trực tiếp
+egress_env: {}

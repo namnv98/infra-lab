@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bản đồ hạ tầng</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: một cột tài liệu kỹ thuật, cùng hệ màu với bản đồ của k8s-lab (màu theo vùng mạng,
+   tím = đường đi của request). Thêm xanh lục cho MGMT và vàng đất cho VPN/quản trị. */
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --fg:#17202b; --muted:#5b6675; --line:#c9d0da;
+  --wan:#c2255c; --wan-bg:#fbe9ef;
+  --dmz:#b35c00; --dmz-bg:#fdf1e2;
+  --lan:#1864ab; --lan-bg:#e7f0fa;
+  --mgmt:#2f7d6d; --mgmt-bg:#e3f2ee;
+  --vpn:#8a6d00; --gcp-bg:#eef0f3;
+  --req:#6741d9; --on-req:#ffffff;
+  --ok:#2b8a3e; --bad:#c92a2a;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f141a; --surface:#161d26; --fg:#e3e8ef; --muted:#93a0b0; --line:#334050;
+  --wan:#f06595; --wan-bg:#2a1620; --dmz:#ffa94d; --dmz-bg:#2a1f12; --lan:#74c0fc; --lan-bg:#132233;
+  --mgmt:#63c7b2; --mgmt-bg:#12241f; --vpn:#e3c04d; --gcp-bg:#141a21;
+  --req:#9775fa; --on-req:#0f141a; --ok:#69db7c; --bad:#ff8787; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141a; --surface:#161d26; --fg:#e3e8ef; --muted:#93a0b0; --line:#334050;
+  --wan:#f06595; --wan-bg:#2a1620; --dmz:#ffa94d; --dmz-bg:#2a1f12; --lan:#74c0fc; --lan-bg:#132233;
+  --mgmt:#63c7b2; --mgmt-bg:#12241f; --vpn:#e3c04d; --gcp-bg:#141a21;
+  --req:#9775fa; --on-req:#0f141a; --ok:#69db7c; --bad:#ff8787; color-scheme:dark}
+
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:15px;line-height:1.55}
+.wrap{max-width:1180px;margin:0 auto;padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:44px}
+header{display:grid;gap:10px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font-size:clamp(26px,4vw,36px);line-height:1.15;margin:0;text-wrap:balance;font-weight:700}
+h2{font-size:21px;margin:0;text-wrap:balance;font-weight:600}
+h3{font-size:15px;margin:0;font-weight:600}
+p{margin:0;max-width:72ch}
+.lede{color:var(--muted);max-width:76ch}
+section{display:grid;gap:16px;min-width:0}
+code,.mono{font-family:var(--mono);font-size:.88em}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font-family:var(--mono);font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted)}
+nav.toc{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:14px;border-top:1px solid var(--line);padding-top:12px}
+nav.toc a{color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line)}
+nav.toc a:hover{border-bottom-color:var(--req)}
+a{color:var(--lan)}
+a:focus-visible{outline:2px solid var(--req);outline-offset:2px}
+
+figure{margin:0;display:grid;gap:10px;min-width:0}
+.scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px}
+.scroll svg{display:block;width:100%;min-width:1000px;height:auto}
+figcaption{font-size:13.5px;color:var(--muted);max-width:92ch}
+
+svg text{font-family:var(--sans);fill:currentColor;font-size:12.5px}
+svg .mono{font-family:var(--mono);font-size:11.5px}
+svg .t{font-weight:600;font-size:13.5px}
+svg .dim{fill:var(--muted)}
+svg .gcp{fill:var(--gcp-bg);stroke:var(--line);stroke-dasharray:6 4}
+svg .z-wan{fill:var(--wan-bg);stroke:var(--wan)}
+svg .z-dmz{fill:var(--dmz-bg);stroke:var(--dmz)}
+svg .z-lan{fill:var(--lan-bg);stroke:var(--lan)}
+svg .z-mgmt{fill:var(--mgmt-bg);stroke:var(--mgmt)}
+svg .box{fill:var(--surface);stroke:var(--line)}
+svg .box-fw{fill:var(--surface);stroke:currentColor;stroke-width:1.8}
+svg .waf{fill:var(--surface);stroke:var(--req);stroke-width:1.6;stroke-dasharray:4 3}
+svg .ln{fill:none;stroke:currentColor;stroke-width:1.3}
+svg .ln-wan{fill:none;stroke:var(--wan);stroke-width:1.6}
+svg .ln-dmz{fill:none;stroke:var(--dmz);stroke-width:1.6}
+svg .ln-lan{fill:none;stroke:var(--lan);stroke-width:1.6}
+svg .ln-mgmt{fill:none;stroke:var(--mgmt);stroke-width:1.6}
+svg .vpn{fill:none;stroke:var(--vpn);stroke-width:2;stroke-dasharray:7 5}
+svg .vpn-t{fill:var(--vpn);font-weight:600}
+svg .req{fill:none;stroke:var(--req);stroke-width:2.6}
+svg .req-t{fill:var(--req);font-weight:600}
+svg .badge{fill:var(--req)}
+svg .badge-t{fill:var(--on-req);font-weight:700;font-size:11.5px}
+svg .c-wan{fill:var(--wan)} svg .c-dmz{fill:var(--dmz)} svg .c-lan{fill:var(--lan)} svg .c-mgmt{fill:var(--mgmt)}
+svg .port{fill:var(--surface);stroke:currentColor;stroke-width:1.6}
+svg .arrow{fill:var(--req)}
+/* topology chính (build_topology.py) */
+.topo{gap:8px}
+.topo-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px}
+.topo-bar button{font:inherit;padding:4px 12px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg);cursor:pointer}
+.topo-bar button:hover{border-color:var(--req)}
+.topo-bar label{display:inline-flex;gap:5px;align-items:center;color:var(--muted)}
+.topo-sep{width:1px;height:18px;background:var(--line)}
+.topo-hint{color:var(--muted);font-size:12px;margin-left:auto}
+.topo-view{height:min(82vh,960px);border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden;cursor:grab;touch-action:none}
+.topo-view.dragging{cursor:grabbing}
+.topo-view:focus-visible{outline:2px solid var(--req);outline-offset:2px}
+.topo-view svg{width:100%;height:100%;display:block;user-select:none}
+.topo:fullscreen{background:var(--bg);padding:16px;display:grid;grid-template-rows:auto 1fr auto auto}
+.topo:fullscreen .topo-view{height:auto}
+#topo-svg .tt{font-size:17px;font-weight:600}
+#topo-svg .tm{font-family:var(--mono);font-size:13.5px}
+#topo-svg .tb{font-size:13px}
+#topo-svg .bus{fill:none;stroke-width:6;stroke-linecap:round}
+#topo-svg .c-wan-s{stroke:var(--wan)} #topo-svg .c-dmz-s{stroke:var(--dmz)} #topo-svg .c-lan-s{stroke:var(--lan)} #topo-svg .c-mgmt-s{stroke:var(--mgmt)}
+#topo-svg .c-vpn{fill:var(--vpn)}
+#topo-svg .ln,#topo-svg .ln-wan,#topo-svg .ln-dmz,#topo-svg .ln-lan,#topo-svg .ln-mgmt{stroke-width:2.2}
+/* sơ đồ chi tiết theo luồng (build_details.py) */
+svg .flow{fill:none;stroke:var(--req);stroke-width:2.2}
+svg .blk{fill:none;stroke:var(--bad);stroke-width:2;stroke-dasharray:5 4}
+svg .m-flow{fill:var(--req)} svg .m-blk{fill:var(--bad)} svg .m-vpn{fill:var(--vpn)}
+svg .lb,svg .lb-blk,svg .lb-vpn{font-weight:600;paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round}
+svg .lb{fill:var(--req)} svg .lb-blk{fill:var(--bad)} svg .lb-vpn{fill:var(--vpn)}
+.sw.blk{height:0;border:0;border-top:3px dashed var(--bad);border-radius:0}
+.sw.waf{background:var(--surface);border-color:var(--req);border-style:dashed}
+section h3{margin-top:12px}
+
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.sw{width:22px;height:12px;border-radius:3px;border:1.5px solid}
+.sw.wan{background:var(--wan-bg);border-color:var(--wan)} .sw.dmz{background:var(--dmz-bg);border-color:var(--dmz)}
+.sw.lan{background:var(--lan-bg);border-color:var(--lan)} .sw.mgmt{background:var(--mgmt-bg);border-color:var(--mgmt)}
+.sw.req{height:0;border:0;border-top:3px solid var(--req);border-radius:0}
+.sw.vpn{height:0;border:0;border-top:3px dashed var(--vpn);border-radius:0}
+.bdg{font-style:normal;width:18px;height:18px;border-radius:50%;background:var(--req);color:var(--on-req);font-size:11px;font-weight:700;display:inline-grid;place-items:center}
+
+/* Luồng */
+.flows{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}
+.flow{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:10px;align-content:start;min-width:0}
+.flow h3{display:flex;align-items:center;gap:8px}
+.flow .dot{width:10px;height:10px;border-radius:50%}
+.flow ol{margin:0;padding-left:20px;display:grid;gap:6px;font-size:14px}
+.flow .guard{font-size:13px;color:var(--muted)}
+.flow .guard b{color:var(--fg);font-weight:600}
+
+/* Quy trình dựng: thứ tự là thông tin */
+ol.steps{list-style:none;margin:0;padding:0;display:grid;gap:10px;counter-reset:st}
+ol.steps li{counter-increment:st;display:grid;grid-template-columns:34px minmax(0,1fr);gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+ol.steps li::before{content:counter(st);width:26px;height:26px;border-radius:50%;border:2px solid var(--fg);font-weight:700;font-size:13px;display:grid;place-items:center}
+.st-head{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.st-head code{color:var(--muted)}
+ol.steps p{margin-top:4px;font-size:14.5px}
+ol.steps .why{margin-top:6px;font-size:13px;color:var(--muted)}
+@media (max-width:520px){ol.steps li{grid-template-columns:28px minmax(0,1fr);gap:10px;padding:12px}}
+
+table{border-collapse:collapse;width:100%;font-size:14px}
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600}
+tr:last-child td{border-bottom:0}
+td.mono,td .mono{font-family:var(--mono);font-size:12.5px}
+.y{color:var(--ok);font-weight:600} .n{color:var(--bad);font-weight:600}
+pre.cmd{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:13px;line-height:1.6}
+pre.cmd .c{color:var(--muted)}
+.note{border-left:3px solid var(--vpn);padding:8px 14px;background:var(--surface);border-radius:0 8px 8px 0;font-size:14px;max-width:90ch}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header>
+  <div class="eyebrow">layered-infra (repo infra-lab) · dựng lại từ đầu 18/10/2026 · project ultra-evening-511813-t2 · asia-southeast1-a</div>
+  <h1>Bản đồ hạ tầng — layered-infra</h1>
+  <p class="lede">Hạ tầng mô phỏng on-prem dựng trên Google Cloud: 2 firewall OPNsense (biên đối mặt Internet, core lọc mọi luồng vào trong), vùng biên trong DMZ có HAProxy + WAF, quản trị qua VPN và jump server, cluster kubeadm, Harbor/Squid/kho S3 tự host, SIEM trong vùng quản trị. Google chỉ cung cấp phần không tránh được: VPC, route, VM, đĩa và IP public. Mọi thứ còn lại do Ansible cấu hình, dùng lại được khi triển khai on-prem thật.</p>
+  <div class="chips">
+    <span class="chip">OPNsense 26.7 nano</span><span class="chip">K8s v1.37.1 · kubeadm</span><span class="chip">Cilium 1.20.2</span>
+    <span class="chip">kube-vip · MetalLB</span><span class="chip">Gateway API v1.6.1</span><span class="chip">Harbor v2.15.4 · Squid</span>
+    <span class="chip">Kyverno 1.19</span><span class="chip">Prometheus (kube-prometheus-stack)</span><span class="chip">Velero 1.18 · Garage S3</span>
+    <span class="chip">Loki · Grafana · Wazuh 4.14.9</span><span class="chip">WireGuard → jump server</span><span class="chip">OpenTofu 1.12 · Ansible</span>
+  </div>
+  <nav class="toc" aria-label="Mục lục">
+    <a href="#topology">Topology</a><a href="#flows">Bốn luồng</a><a href="#build">Quy trình dựng</a><a href="#detail">Chi tiết luồng</a>
+    <a href="#gcp">Phần GCP bắt buộc</a><a href="#diff">Khác bản KVM</a><a href="#onprem">Chuyển sang on-prem</a><a href="#ops">Vận hành</a>
+  </nav>
+</header>
+
+<section id="topology">
+  <h2>Topology: 2 firewall, 8 VM, 4 VPC</h2>
+  <!-- TOPO:BEGIN -->
+<figure class="topo">
+  <div class="topo-bar" role="toolbar" aria-label="Điều khiển sơ đồ">
+    <button type="button" data-z="in" aria-label="Phóng to">+</button>
+    <button type="button" data-z="out" aria-label="Thu nhỏ">−</button>
+    <button type="button" data-z="fit">Vừa khung</button>
+    <button type="button" data-z="full">Toàn màn hình</button>
+    <span class="topo-sep"></span>
+    <label><input type="checkbox" data-l="web" checked> luồng web (1–6)</label>
+    <label><input type="checkbox" data-l="vpn" checked> VPN quản trị</label>
+    <label><input type="checkbox" data-l="route" checked> ghi chú route</label>
+    <span class="topo-hint">kéo để di chuyển · Ctrl + cuộn để phóng to</span>
+  </div>
+  <div class="topo-view" id="topo-view" tabindex="0">
+<svg id="topo-svg" viewBox="0 0 1800 1520" role="img" aria-label="Topology chi tiết: Internet và máy admin vào qua IP public của firewall biên (WAN, DMZ, VPN wg0); DMZ chứa edge-01 (HAProxy + WAF) và card ngoài của firewall core; firewall core (DMZ, LAN, MGMT, không NAT) nối VPC LAN (k8s-master-01, k8s-worker-01, infra-01) và VPC MGMT (siem-01, jump-01).">
+<defs><marker id="tp-ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="arrow"/></marker><marker id="tp-av" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-vpn"/></marker></defs>
+<rect x="20" y="120" width="1760" height="1380" rx="16" class="gcp" />
+<text x="40" y="146" text-anchor="start" class="tm dim">GCP project ultra-evening-511813-t2 · asia-southeast1-a · chỉ dùng: VPC, route, VM, đĩa, IP public</text>
+<rect x="260" y="20" width="340" height="74" rx="10" class="box" />
+<text x="430" y="50" text-anchor="middle" class="tt">Internet · người dùng</text>
+<text x="430" y="74" text-anchor="middle" class="tm dim">https://*.apps.lab.internal</text>
+<rect x="1090" y="20" width="380" height="74" rx="10" class="box" />
+<text x="1280" y="50" text-anchor="middle" class="tt">Máy admin (EndeavourOS)</text>
+<text x="1280" y="74" text-anchor="middle" class="tm dim">WireGuard gcp-lab · 10.50.0.2/32</text>
+<rect x="280" y="156" width="300" height="52" rx="26" class="box" />
+<text x="430" y="178" text-anchor="middle" class="tt">IP web (tĩnh)</text>
+<text x="430" y="199" text-anchor="middle" class="tm dim">NAT 1:1 → 10.99.0.2 · chỉ tcp 80,443</text>
+<rect x="1160" y="156" width="240" height="52" rx="26" class="box" />
+<text x="1280" y="178" text-anchor="middle" class="tt vpn-t">IP VPN (tĩnh, riêng)</text>
+<text x="1280" y="199" text-anchor="middle" class="tm dim">protocol fwd · chỉ udp 51820</text>
+<polyline points="430,94 430,156" class="ln"/>
+<polyline points="1280,94 1280,156" class="vpn"/>
+<rect x="40" y="236" width="1720" height="70" rx="10" class="z-wan" />
+<text x="640" y="258" text-anchor="start" class="tt c-wan">VPC WAN · 10.99.0.0/24</text>
+<text x="640" y="278" text-anchor="start" class="tm dim">gateway .1 → Internet (route GCP)</text>
+<text x="640" y="298" text-anchor="start" class="tm dim">VPC firewall: IP web tcp 80,443 · IP VPN udp 51820</text>
+<polyline points="60,290 600,290" class="bus c-wan-s"/>
+<polyline points="430,208 430,290" class="ln-wan"/>
+<rect x="250" y="340" width="560" height="220" rx="12" class="box-fw" />
+<text x="266" y="368" text-anchor="start" class="tt">firewall-edge-01 · FIREWALL BIÊN</text>
+<text x="794" y="368" text-anchor="end" class="tm dim">OPNsense 26.7 · e2-medium</text>
+<circle cx="276" cy="393" r="5" class="c-wan"/>
+<text x="288" y="398" text-anchor="start" class="tm">vtnet1</text>
+<text x="360" y="398" text-anchor="start" class="tm c-wan">10.99.0.2/24</text>
+<text x="540" y="398" text-anchor="start" class="tm dim">WAN · gw .1 mặc định</text>
+<circle cx="276" cy="417" r="5" class="c-dmz"/>
+<text x="288" y="422" text-anchor="start" class="tm">vtnet0</text>
+<text x="360" y="422" text-anchor="start" class="tm c-dmz">10.10.10.253/24</text>
+<text x="540" y="422" text-anchor="start" class="tm dim">DMZ · gw .1 (far)</text>
+<circle cx="276" cy="441" r="5" class="c-vpn"/>
+<text x="288" y="446" text-anchor="start" class="tm">wg0</text>
+<text x="360" y="446" text-anchor="start" class="tm c-vpn">10.50.0.1/24</text>
+<text x="540" y="446" text-anchor="start" class="tm dim">WireGuard udp 51820</text>
+<text x="270" y="480" text-anchor="start" class="tm">NAT hybrid (LAN/MGMT sau core) · port fwd 80/443 → edge-01</text>
+<text x="270" y="502" text-anchor="start" class="tm dim">Unbound (tên công cộng) · NTP cho DMZ</text>
+<text x="270" y="524" text-anchor="start" class="tm dim">route 10.20/24, 10.40/24 → DMZ_GW (.1) → core</text>
+<text x="270" y="546" text-anchor="start" class="tm dim">17 luật: WAN 1 · VPN 6 · DMZ 10 · GUI: VPN, jump-01</text>
+<circle cx="430" cy="340" r="7" class="port c-wan"/>
+<polyline points="430,290 430,333" class="ln-wan"/>
+<circle cx="530" cy="560" r="7" class="port c-dmz"/>
+<rect x="40" y="574" width="1720" height="200" rx="10" class="z-dmz" />
+<text x="60" y="600" text-anchor="start" class="tt c-dmz">VPC DMZ · 10.10.10.0/24 · vùng biên + trung chuyển</text>
+<polyline points="60,616 1200,616" class="bus c-dmz-s"/>
+<polyline points="530,567 530,616" class="ln-dmz"/>
+<rect x="110" y="636" width="640" height="128" rx="8" class="box" />
+<text x="126" y="664" text-anchor="start" class="tt">edge-01 · LB + WAF  (10.10.10.10 · e2-small)</text>
+<text x="126" y="688" text-anchor="start" class="tm">HAProxy :80 → 301 · :443 TLS (cert edge riêng *.apps.lab.internal)</text>
+<text x="126" y="709" text-anchor="start" class="tm req-t">→ WAF 127.0.0.1:8080: ModSecurity v3 + OWASP CRS 4.30 (PL1, chặn 403)</text>
+<text x="126" y="730" text-anchor="start" class="tm">→ HAProxy 127.0.0.1:8081 → Gateway .200:443 (TLS, kiểm lab-ca, SNI = Host)</text>
+<text x="126" y="751" text-anchor="start" class="tm dim">rsyslog · auditd · Wazuh agent · chrony/DNS → .253 (biên)</text>
+<polyline points="330,616 330,636" class="ln-dmz"/>
+<rect x="1240" y="626" width="500" height="136" rx="8" class="box" />
+<text x="1256" y="652" text-anchor="start" class="tt">Route VPC DMZ</text>
+<text x="1256" y="676" text-anchor="start" class="tm">0.0.0.0/0    → 10.10.10.253 (biên)</text>
+<text x="1256" y="698" text-anchor="start" class="tm">10.20.0.0/24 → 10.10.10.252 (core)</text>
+<text x="1256" y="720" text-anchor="start" class="tm">10.40.0.0/24 → 10.10.10.252 (core)</text>
+<text x="1256" y="744" text-anchor="start" class="tm dim">VPC firewall: 10/8 mọi cổng · tcp 80,443 từ mọi nơi</text>
+<rect x="560" y="808" width="640" height="200" rx="12" class="box-fw" />
+<text x="576" y="836" text-anchor="start" class="tt">firewall-core-01 · FIREWALL CORE</text>
+<text x="1184" y="836" text-anchor="end" class="tm dim">OPNsense 26.7 · e2-highcpu-4</text>
+<circle cx="586" cy="861" r="5" class="c-dmz"/>
+<text x="598" y="866" text-anchor="start" class="tm">vtnet1</text>
+<text x="670" y="866" text-anchor="start" class="tm c-dmz">10.10.10.252/24</text>
+<text x="850" y="866" text-anchor="start" class="tm dim">DMZ (&quot;wan&quot;) · gw .1 mặc định → biên</text>
+<circle cx="586" cy="885" r="5" class="c-lan"/>
+<text x="598" y="890" text-anchor="start" class="tm">vtnet0</text>
+<text x="670" y="890" text-anchor="start" class="tm c-lan">10.20.0.253/24</text>
+<text x="850" y="890" text-anchor="start" class="tm dim">LAN</text>
+<circle cx="586" cy="909" r="5" class="c-mgmt"/>
+<text x="598" y="914" text-anchor="start" class="tm">vtnet2</text>
+<text x="670" y="914" text-anchor="start" class="tm c-mgmt">10.40.0.253/24</text>
+<text x="850" y="914" text-anchor="start" class="tm dim">MGMT</text>
+<text x="580" y="948" text-anchor="start" class="tm">KHÔNG NAT · không IP public · Unbound nội bộ lab.internal · NTP</text>
+<text x="580" y="970" text-anchor="start" class="tm dim">route /25 qua gateway .1 từng vùng (GCP không trả lời ARP giữa VM)</text>
+<text x="580" y="992" text-anchor="start" class="tm dim">25 luật: DMZ 9 (nguồn đích danh) · LAN 10 · MGMT 6</text>
+<circle cx="900" cy="808" r="7" class="port c-dmz"/>
+<polyline points="900,616 900,801" class="ln-dmz"/>
+<circle cx="760" cy="1008" r="7" class="port c-lan"/>
+<circle cx="1130" cy="1008" r="7" class="port c-mgmt"/>
+<rect x="40" y="1040" width="1150" height="450" rx="10" class="z-lan" />
+<text x="60" y="1066" text-anchor="start" class="tt c-lan">VPC LAN · 10.20.0.0/24 — cluster K8s v1.37 + dịch vụ chung</text>
+<polyline points="60,1082 1170,1082" class="bus c-lan-s"/>
+<polyline points="760,1015 760,1082" class="ln-lan"/>
+<rect x="60" y="1104" width="360" height="250" rx="8" class="box" />
+<text x="76" y="1132" text-anchor="start" class="tt">k8s-master-01</text>
+<text x="76" y="1156" text-anchor="start" class="tm c-lan">10.20.0.11 · alias 10.20.0.10 (VIP)</text>
+<text x="76" y="1177" text-anchor="start" class="tm dim">e2-medium · 30GB · control-plane</text>
+<text x="76" y="1198" text-anchor="start" class="tm dim">kube-apiserver :6443 (qua VIP)</text>
+<text x="76" y="1219" text-anchor="start" class="tm dim">kube-vip · etcd (Secret mã hoá)</text>
+<text x="76" y="1240" text-anchor="start" class="tm dim">scheduler · controller-manager</text>
+<text x="76" y="1261" text-anchor="start" class="tm dim">Kyverno (chỉ image Harbor)</text>
+<text x="76" y="1282" text-anchor="start" class="tm dim">Pod Security restricted · audit log</text>
+<text x="76" y="1303" text-anchor="start" class="tm dim">etcd snapshot 02:00 (7 bản)</text>
+<rect x="440" y="1104" width="380" height="250" rx="8" class="box" />
+<text x="456" y="1132" text-anchor="start" class="tt">k8s-worker-01</text>
+<text x="456" y="1156" text-anchor="start" class="tm c-lan">10.20.0.21 · alias .200 .210</text>
+<text x="456" y="1177" text-anchor="start" class="tm dim">e2-medium · 30GB · worker</text>
+<text x="456" y="1198" text-anchor="start" class="tm req-t">Gateway public .200 (Envoy) *.apps</text>
+<text x="456" y="1219" text-anchor="start" class="tm dim">Gateway internal .210 (Envoy) *.int</text>
+<text x="456" y="1240" text-anchor="start" class="tm dim">whoami ×2 (ns demo, CNP)</text>
+<text x="456" y="1261" text-anchor="start" class="tm dim">Prometheus · cert-manager · Velero</text>
+<text x="456" y="1282" text-anchor="start" class="tm dim">MetalLB · Cilium (VXLAN)</text>
+<text x="456" y="1303" text-anchor="start" class="tm dim">pod 10.244.0.0/16 · svc 10.96.0.0/12</text>
+<rect x="840" y="1104" width="330" height="250" rx="8" class="box" />
+<text x="856" y="1132" text-anchor="start" class="tt">infra-01</text>
+<text x="856" y="1156" text-anchor="start" class="tm c-lan">10.20.0.30</text>
+<text x="856" y="1177" text-anchor="start" class="tm dim">e2-medium · 50GB · dịch vụ chung</text>
+<text x="856" y="1198" text-anchor="start" class="tm dim">Harbor :443 (proxy-cache image)</text>
+<text x="856" y="1219" text-anchor="start" class="tm dim">Squid :3128 (allowlist tên miền)</text>
+<text x="856" y="1240" text-anchor="start" class="tm dim">Garage S3 :3900 (Velero)</text>
+<text x="856" y="1261" text-anchor="start" class="tm dim">Loki bản sao :3100 (90 ngày)</text>
+<text x="856" y="1282" text-anchor="start" class="tm dim">ra Internet: core #140 → biên #20</text>
+<text x="856" y="1303" text-anchor="start" class="tm dim">rồi NAT ở biên</text>
+<polyline points="240,1082 240,1104" class="ln-lan"/>
+<polyline points="630,1082 630,1104" class="ln-lan"/>
+<polyline points="1005,1082 1005,1104" class="ln-lan"/>
+<text x="60" y="1384" text-anchor="start" class="tm dim">Route VPC LAN: 0.0.0.0/0 → 10.20.0.253 (core) · VPC firewall: 10/8 mọi cổng</text>
+<text x="60" y="1406" text-anchor="start" class="tm dim">alias IP (.10 VIP, .200/.210 Gateway) do GCP định tuyến — thay ARP của kube-vip/MetalLB · MTU 1460</text>
+<rect x="1210" y="1040" width="550" height="450" rx="10" class="z-mgmt" />
+<text x="1230" y="1066" text-anchor="start" class="tt c-mgmt">VPC MGMT · 10.40.0.0/24</text>
+<polyline points="1230,1082 1740,1082" class="bus c-mgmt-s"/>
+<polyline points="1130,1015 1130,1030 1290,1030 1290,1082" class="ln-mgmt"/>
+<rect x="1230" y="1104" width="500" height="190" rx="8" class="box" />
+<text x="1246" y="1132" text-anchor="start" class="tt">siem-01 · SIEM</text>
+<text x="1246" y="1156" text-anchor="start" class="tm c-mgmt">10.40.0.10 · e2-medium · 30GB</text>
+<text x="1246" y="1177" text-anchor="start" class="tm dim">Alloy :1514 (syslog RFC5424) → Loki (30 ngày)</text>
+<text x="1246" y="1198" text-anchor="start" class="tm dim">Grafana :3000 · luật cảnh báo → Mailpit :8025</text>
+<text x="1246" y="1219" text-anchor="start" class="tm dim">Wazuh manager :1515/1516</text>
+<text x="1246" y="1240" text-anchor="start" class="tm dim">← log 2 firewall, mọi VM; metric Prometheus (.210)</text>
+<text x="1246" y="1261" text-anchor="start" class="tm dim">bản sao log → infra-01:3100</text>
+<rect x="1230" y="1314" width="500" height="128" rx="8" class="box" />
+<text x="1246" y="1342" text-anchor="start" class="tt">jump-01 · bastion</text>
+<text x="1246" y="1366" text-anchor="start" class="tm c-mgmt">10.40.0.20 · e2-micro · 10GB</text>
+<text x="1246" y="1387" text-anchor="start" class="tm dim">sshd chỉ khoá · pam_tty_audit (ghi phiên → SIEM)</text>
+<text x="1246" y="1408" text-anchor="start" class="tm dim">ProxyCommand (Ansible, ./lab.sh ssh/scp) · SOCKS :1080</text>
+<text x="1246" y="1429" text-anchor="start" class="tm dim">→ máy trong: :22 :443 :6443 :3000 :8025 (core #205)</text>
+<polyline points="1480,1082 1480,1104" class="ln-mgmt"/>
+<polyline points="1745,1082 1745,1378 1732,1378" class="ln-mgmt"/>
+<text x="1230" y="1470" text-anchor="start" class="tm dim">Route VPC MGMT: 0.0.0.0/0 → 10.40.0.253 (core)</text>
+<g class="layer" data-layer="web">
+<polyline points="590,94 590,140 620,140 620,334" class="req" marker-end="url(#tp-ah)"/>
+<circle cx="636" cy="172" r="13" class="badge"/><text x="636" y="177" text-anchor="middle" class="badge-t tb">1</text>
+<circle cx="244" cy="336" r="13" class="badge"/><text x="244" y="341" text-anchor="middle" class="badge-t tb">2</text>
+<polyline points="552,565 552,634" class="req" marker-end="url(#tp-ah)"/>
+<circle cx="572" cy="592" r="13" class="badge"/><text x="572" y="597" text-anchor="middle" class="badge-t tb">3</text>
+<polyline points="700,766 700,788 880,788 880,804" class="req" marker-end="url(#tp-ah)"/>
+<circle cx="840" cy="788" r="13" class="badge"/><text x="840" y="793" text-anchor="middle" class="badge-t tb">4</text>
+<polyline points="740,1012 740,1062 600,1062 600,1100" class="req" marker-end="url(#tp-ah)"/>
+<circle cx="668" cy="1062" r="13" class="badge"/><text x="668" y="1067" text-anchor="middle" class="badge-t tb">5</text>
+<circle cx="806" cy="1206" r="13" class="badge"/><text x="806" y="1211" text-anchor="middle" class="badge-t tb">6</text>
+<text x="630" y="120" text-anchor="start" class="tm req-t">tcp 443 → port fwd</text>
+<text x="710" y="780" text-anchor="start" class="tm req-t">core #10</text>
+</g>
+<g class="layer" data-layer="vpn">
+<polyline points="1280,208 1280,322 830,322 830,440 814,440" class="vpn" marker-end="url(#tp-av)"/>
+<text x="1290" y="250" text-anchor="start" class="tm vpn-t">udp 51820 → wg0 (#5 biên)</text>
+<text x="1290" y="270" text-anchor="start" class="tm dim">Virtual IP /32 trên WAN của biên</text>
+<polyline points="812,530 850,530 850,796 1000,796 1000,804" class="vpn" marker-end="url(#tp-av)"/>
+<text x="920" y="652" text-anchor="start" class="tm vpn-t">VPN → jump-01:22</text>
+<text x="920" y="672" text-anchor="start" class="tm dim">(#300 biên)</text>
+<polyline points="1202,900 1770,900 1770,1360 1734,1360" class="vpn" marker-end="url(#tp-av)"/>
+<text x="1760" y="892" text-anchor="end" class="tm vpn-t">#40 core → jump-01:22</text>
+</g>
+<g class="layer" data-layer="route">
+<text x="560" y="1028" text-anchor="start" class="tm dim">DMZ_GW .1 = gateway mặc định của core (về biên)</text>
+</g>
+</svg>
+  </div>
+  <div class="legend">
+    <span><i class="sw wan"></i>WAN</span><span><i class="sw dmz"></i>DMZ</span><span><i class="sw lan"></i>LAN / cluster</span><span><i class="sw mgmt"></i>MGMT</span>
+    <span><i class="sw req"></i>request web</span><span><i class="sw vpn"></i>VPN quản trị</span><span><i class="bdg">1</i>chặng (bảng bên dưới)</span>
+  </div>
+  <figcaption>Sơ đồ chính, vẽ đủ card mạng, IP, gateway, route và dịch vụ của từng máy. Mô hình <b>screened subnet</b>: firewall
+  <b>biên</b> giữ IP public, NAT, port forward, VPN; firewall <b>core</b> không IP public, không NAT, lọc mọi luồng vào LAN/MGMT. DMZ kiêm
+  đường trung chuyển giữa 2 firewall. Mỗi vùng là một VPC riêng (GCP buộc mỗi card ở VPC khác nhau; số card ≤ số vCPU). <b>Web và VPN
+  tách 2 IP public</b>: IP web chỉ mở tcp 80/443, IP VPN (protocol forwarding, giữ nguyên IP đích → Virtual IP trên WAN của biên) chỉ mở udp 51820 (<code>docs/thiet-ke-tach-ip-vpn.md</code>).</figcaption>
+</figure>
+<script>
+(() => {
+  const view = document.getElementById("topo-view"), svg = document.getElementById("topo-svg");
+  const W = 1800, H = 1520; let vb = {x: 0, y: 0, w: W, h: H};
+  const set = () => svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  const fit = () => { vb = {x: 0, y: 0, w: W, h: H}; set(); };
+  const zoom = (f, cx = 0.5, cy = 0.5) => {
+    const nw = Math.min(W * 1.5, Math.max(W / 8, vb.w * f)), nh = nw * H / W;
+    vb.x += (vb.w - nw) * cx; vb.y += (vb.h - nh) * cy; vb.w = nw; vb.h = nh; set();
+  };
+  document.querySelectorAll(".topo-bar [data-z]").forEach(b => b.addEventListener("click", () => {
+    const z = b.dataset.z;
+    if (z === "in") zoom(0.7); else if (z === "out") zoom(1 / 0.7); else if (z === "fit") fit();
+    else if (z === "full") { const f = view.closest(".topo"); document.fullscreenElement ? document.exitFullscreen() : f.requestFullscreen && f.requestFullscreen(); }
+  }));
+  document.querySelectorAll(".topo-bar [data-l]").forEach(c => c.addEventListener("change", () => {
+    svg.querySelectorAll(`[data-layer="${c.dataset.l}"]`).forEach(g => g.style.display = c.checked ? "" : "none");
+  }));
+  view.addEventListener("wheel", e => {
+    if (!e.ctrlKey && !document.fullscreenElement) return;
+    e.preventDefault(); const r = view.getBoundingClientRect();
+    zoom(e.deltaY > 0 ? 1.15 : 1 / 1.15, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+  }, {passive: false});
+  view.addEventListener("dblclick", e => { const r = view.getBoundingClientRect(); zoom(0.6, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height); });
+  let drag = null;
+  view.addEventListener("pointerdown", e => { drag = {x: e.clientX, y: e.clientY, vx: vb.x, vy: vb.y}; view.setPointerCapture(e.pointerId); view.classList.add("dragging"); });
+  view.addEventListener("pointermove", e => {
+    if (!drag) return; const r = view.getBoundingClientRect(), s = vb.w / r.width;
+    vb.x = drag.vx - (e.clientX - drag.x) * s; vb.y = drag.vy - (e.clientY - drag.y) * s; set();
+  });
+  const end = () => { drag = null; view.classList.remove("dragging"); };
+  view.addEventListener("pointerup", end); view.addEventListener("pointercancel", end);
+  view.addEventListener("keydown", e => {
+    const k = { "+": 0.8, "=": 0.8, "-": 1.25 }[e.key]; if (k) { zoom(k); e.preventDefault(); }
+    if (e.key === "0") fit();
+  });
+})();
+</script>
+<!-- TOPO:END -->
+
+  <div class="tbl"><table>
+    <thead><tr><th>Chặng</th><th>Ở đâu</th><th>Chuyện gì xảy ra</th><th>Ai chặn nếu sai</th></tr></thead>
+    <tbody>
+      <tr><td><i class="bdg">1</i></td><td class="mono">Internet → IP public :443</td><td>GCP dịch IP public sang 10.99.0.2 (card WAN của firewall-edge-01).</td><td>VPC firewall chỉ cho tcp 80/443, udp 51820 tới tag <code>fw</code>.</td></tr>
+      <tr><td><i class="bdg">2</i></td><td class="mono">firewall-edge-01 WAN</td><td>Port forward đổi đích sang HAProxy 10.10.10.10, giữ IP thật của client.</td><td>Trên WAN chỉ có web (port forward) và WireGuard; GUI chỉ mở cho VPN và jump-01; luật BOOTSTRAP đã bị xoá.</td></tr>
+      <tr><td><i class="bdg">3</i></td><td class="mono">edge-01 :443 · HAProxy + WAF</td><td>HAProxy giải mã TLS (cert edge riêng), WAF (ModSecurity + OWASP CRS) chặn SQLi/XSS/LFI/scanner (403); request sạch được HAProxy mã hoá lại tới Gateway 10.20.0.200, kiểm cert bằng CA nội bộ (<code>lab-ca</code>).</td><td>Luật DMZ #10 chỉ cho DMZ → gw_public 80/443; #30 chặn DMZ → mọi IP nội bộ khác. Cổng WAF chỉ nghe nội bộ edge-01.</td></tr>
+      <tr><td><i class="bdg">4</i></td><td class="mono">firewall-core-01 DMZ → LAN</td><td>Route VPC DMZ 10.20/24 → core .252; core cho edge-01 → .200:443 (luật core #10) rồi đẩy sang LAN, GCP giao cho k8s-worker-01 nhờ alias .200.</td><td>Core chỉ nhận từ DMZ đúng các nguồn khai báo (edge-01, biên, dải VPN); còn lại chặn và ghi log (#49).</td></tr>
+      <tr><td><i class="bdg">5</i></td><td class="mono">k8s-worker-01 · Gateway .200</td><td>Cilium Envoy giải mã TLS (cert từ CA <code>lab-ca</code>) và định tuyến theo hostname.</td><td>Gateway chỉ nhận HTTPRoute từ namespace có nhãn cho phép.</td></tr>
+      <tr><td><i class="bdg">6</i></td><td class="mono">Envoy → whoami</td><td>Request đã qua WAF ở biên; app nhận IP thật của client trong <code>X-Forwarded-For</code>.</td><td>CiliumNetworkPolicy: whoami chỉ nhận từ Envoy của Gateway; Pod Security <code>restricted</code>.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="flows">
+  <h2>Bốn luồng traffic</h2>
+  <div class="flows">
+    <div class="flow">
+      <h3><span class="dot" style="background:var(--req)"></span>Vào: người dùng → app</h3>
+      <ol>
+        <li>Client → IP public :443 → firewall-edge-01 (port forward)</li>
+        <li>Port forward → HAProxy edge-01 (giải mã TLS)</li>
+        <li>WAF (OWASP CRS) trên edge-01 lọc request</li>
+        <li>HAProxy → Gateway 10.20.0.200 (TLS, qua firewall-core-01) → whoami</li>
+      </ol>
+      <p class="guard"><b>Kiểm thử:</b> <code>curl --resolve whoami.apps.lab.internal:443:&lt;IP public&gt; --cacert out/lab-ca.crt …</code> → 200; gửi SQLi → 403.</p>
+    </div>
+    <div class="flow">
+      <h3><span class="dot" style="background:var(--lan)"></span>Ra: node → Internet</h3>
+      <ol>
+        <li>containerd kéo image qua <b>Harbor</b> (proxy-cache docker.io, registry.k8s.io, ghcr.io, quay.io)</li>
+        <li>apt, curl, helm đi qua <b>Squid</b> :3128, chỉ tên miền trong allowlist</li>
+        <li>Chỉ infra-01 được ra Internet 80/443: core cho (#140), biên cho (#20) và NAT ra IP public (Source NAT hybrid)</li>
+      </ol>
+      <p class="guard"><b>Kiểm thử:</b> k8s-master-01 → example.com trực tiếp: bị chặn; qua Squid tới dl.k8s.io: 200; example.com qua Squid: bị chặn.</p>
+    </div>
+    <div class="flow">
+      <h3><span class="dot" style="background:var(--vpn)"></span>Quản trị: admin → mọi thứ</h3>
+      <ol>
+        <li>Máy admin bật <code>./lab.sh vpn up</code> (WireGuard, không cần sudo), IP 10.50.0.2</li>
+        <li>VPN chỉ tới được <b>jump-01:22</b> và GUI/API OPNsense :443 (cứu hộ, Ansible cấu hình firewall)</li>
+        <li><code>./lab.sh ssh &lt;ip&gt;</code> và Ansible SSH xuyên qua jump-01 (ProxyCommand)</li>
+        <li><code>./lab.sh tunnel up</code>: SOCKS 127.0.0.1:1080 qua jump-01 cho trình duyệt (Grafana, Harbor, Prometheus) và kubectl</li>
+      </ol>
+      <p class="guard"><b>Không VM nào có IP public</b> ngoài firewall-edge-01. Từ VPN đi thẳng tới k8s-master-01:22 hay Grafana: bị chặn. Phiên SSH trên jump-01 được ghi lại (pam_tty_audit → auditd → SIEM).</p>
+    </div>
+    <div class="flow">
+      <h3><span class="dot" style="background:var(--mgmt)"></span>Log: mọi máy → siem-01</h3>
+      <ol>
+        <li>OPNsense: syslog TCP RFC5424 → siem-01:1514</li>
+        <li>VM Linux: rsyslog (journal, auth, auditd) → siem-01:1514</li>
+        <li>Wazuh agent → manager siem-01:1515/1516</li>
+        <li>Alloy ghi vào Loki (bản sao trên infra-01); Grafana chạy luật cảnh báo → Mailpit</li>
+        <li>Metric: Grafana đọc Prometheus trong cluster qua Gateway internal .210 (luật MGMT #215)</li>
+      </ol>
+      <p class="guard"><b>Mở luồng này</b> bằng luật #25/#26 (DMZ), #160/#165 (LAN), #215 (MGMT).</p>
+    </div>
+  </div>
+</section>
+
+<section id="build">
+  <h2>Quy trình dựng từ con số 0</h2>
+  <p>Nguyên tắc: <b>image gốc của hãng + cấu hình bootstrap tối thiểu + Ansible làm phần còn lại</b>. Không đóng cấu hình vào image, nên cùng một image dùng được cho GCP, lab local và on-prem thật.</p>
+  <ol class="steps">
+    <li><div><div class="st-head"><h3>Golden image OPNsense</h3><code>./lab.sh image</code></div>
+      <p>Tạo VM Ubuntu tạm trong VPC WAN, tải <code>OPNsense-26.7-nano-amd64.img.bz2</code> từ pkg.opnsense.org, kiểm tra SHA256, ghi lên đĩa phụ rồi tự tắt. GCP tạo image <code>opnsense-26-7-nano</code> từ đĩa đó; VM tạm và đĩa bị xoá.</p>
+      <p class="why">Tải trên GCP mất dưới 1 phút; qua Wi-Fi máy local sẽ mất hàng chục phút.</p></div></li>
+    <li><div><div class="st-head"><h3>Hạ tầng bằng OpenTofu</h3><code>./lab.sh up</code></div>
+      <p>Sinh 2 config bootstrap (<code>out/opnsense-{edge,core}-bootstrap.xml</code>) từ <code>config.xml.sample</code> đúng phiên bản 26.7, rồi tạo 4 VPC, 5 route VPC, VPC firewall tối thiểu, 2 IP public (web + VPN), 2 firewall (biên 2 card, core 3 card) và 6 VM Ubuntu 24.04 có user <code>ubuntu</code> + khoá SSH. Code chia 3 module dùng chung (<code>tofu/modules/{network,firewall,vm}</code>); môi trường <code>tofu/envs/gcp</code> đọc <code>plan.yml</code> rồi gọi module.</p>
+      <p class="why">Bootstrap chỉ chứa: IP + MTU từng card, gateway .1 từng vùng (far gateway), route /25, mật khẩu root + API key riêng mỗi firewall, và 1 luật TẠM: biên cho IP public của admin gọi API trên WAN; core cho dải VPN gọi API trên card DMZ. Core: NAT tắt hẳn, card ngoài không chặn dải private; cả hai bỏ anti-lockout.</p></div></li>
+    <li><div><div class="st-head"><h3>Nạp bootstrap qua console nối tiếp</h3><code>./lab.sh fw-bootstrap</code></div>
+      <p>= <code>ansible-playbook site.yml --tags bootstrap,network</code> (bước này đến hết bước "Cấu hình đầy đủ qua VPN"). Hai script <code>scripts/fw-console-bootstrap.py</code> chạy song song, mỗi firewall một console: đăng nhập <code>root/opnsense</code> mặc định, chạy <code>dhclient</code>, thêm route tới 169.254.169.254, tải config từ metadata vào <code>/conf/config.xml</code> rồi khởi động lại.</p></div></li>
+    <li><div><div class="st-head"><h3>Dựng VPN qua WAN</h3><code>00-firewall-bootstrap.yml</code></div>
+      <p>Ansible gọi API của <b>biên</b> qua IP public (chỉ IP của admin được phép), chỉ tạo WireGuard <code>wg-admin</code>, peer admin, alias và luật VPN. Máy admin bật kết nối NetworkManager <code>gcp-lab</code>; core lúc này đã gọi được xuyên VPN.</p></div></li>
+    <li><div><div class="st-head"><h3>Cấu hình đầy đủ qua VPN</h3><code>10-network.yml</code></div>
+      <p>Cấu hình cả 2 firewall qua VPN (nhóm <code>[firewalls]</code>, luật từng máy ở <code>inventories/gcp/host_vars/firewall-*.yml</code>): biên — luật VPN/DMZ, port forward, Source NAT hybrid; core — luật DMZ/LAN/MGMT, DNS nội bộ. Tắt "allow LAN to any", syslog → siem-01, <b>xoá 2 luật BOOTSTRAP</b>, siết SSH trên jump-01.</p></div></li>
+    <li><div><div class="st-head"><h3>Cluster và dịch vụ</h3><code>./lab.sh cluster</code></div>
+      <p><code>20-kubernetes.yml</code> (kubeadm, Cilium) → <code>30-cluster-addons.yml</code> (MetalLB, Gateway API, cert-manager, 2 Gateway) → <code>40-shared-services.yml</code> (Harbor, Squid, mirror cho node, S3 Garage) → <code>50-apps-edge.yml</code> (whoami, cert edge, HAProxy + WAF trên edge-01) → nạp cache Harbor → khoá egress → <b>2 nhánh song song</b> → <code>80-backup.yml</code> (Velero).</p>
+      <p>Nhánh k8s: <code>60-security.yml</code> (Kyverno, hardening apiserver, backup etcd, kube-bench) → <code>70-observability.yml</code> (Prometheus). Nhánh ops: <code>70-observability.yml</code> (siem-01, rsyslog, auditd, Wazuh agent). Kho S3 Garage trên infra-01 dựng sớm hơn, trong <code>40-shared-services.yml</code>. Log từng nhánh ở <code>out/logs/lane-*.log</code>.</p>
+      <p class="why">Ba playbook đầu chạy với <code>egress_temp_open=true</code> vì Squid chưa tồn tại. App nằm sau <code>40-shared-services.yml</code> vì image kéo qua Harbor; vùng biên cần cert do cert-manager trong cluster cấp. Nhánh k8s phải tuần tự vì <code>60-security.yml</code> khởi động lại kube-apiserver, Helm chạy cùng lúc sẽ lỗi.</p></div></li>
+  </ol>
+  <p class="note"><b>Dựng lại từ đầu lần 2 (18/10/2026)</b> sau khi tái cấu trúc Ansible, gom bootstrap vào <code>site.yml</code> và lấy mọi IP từ <code>plan.yml</code>: <code>up</code> → <code>fw-bootstrap</code> → <code>cluster</code> chạy một mạch không lỗi (cluster ~25 phút), kiểm thử đầu-cuối đạt hết.</p>
+  <p class="note"><b>Dựng lại từ đầu trên máy mới (17/10/2026, <code>out/</code> trống)</b> lộ 4 lỗi chỉ xuất hiện khi chưa có gì sẵn, đã sửa: <code>tofu destroy</code> đòi file bootstrap trong <code>out/</code>; khoá WireGuard admin chưa có script sinh (giờ <code>lab.sh up</code> tự sinh); <code>10-network.yml</code> gọi kubectl khi chưa có cluster; whoami/WAF kéo image qua Harbor trước khi Harbor được cài.</p>
+</section>
+
+<!-- CHI-TIET:BEGIN -->
+<section id="detail">
+  <h2>Sơ đồ chi tiết theo luồng</h2>
+  <p>Cùng một khung (Internet, firewall biên, firewall core, 3 vùng), mỗi sơ đồ chỉ vẽ một loại traffic. Nhãn trên mũi tên ghi số luật và firewall cho phép luồng đó — xem 2 ma trận cuối mục.</p>
+<h3 id="fl-egress">Đi ra Internet: chỉ infra-01 được ra, NAT ở biên</h3>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 1180 600" role="img" aria-label="Node K8s kéo image qua Harbor và cài gói qua Squid trên infra-01 cùng subnet; infra-01 ra Internet qua firewall core (luật 140) rồi firewall biên (luật 20) và được NAT ra IP public; edge-01 ra thẳng qua biên; MGMT đi qua Squid; node và MGMT ra thẳng bị chặn ở core.">
+<defs><marker id="fl-egress-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-flow"/></marker><marker id="fl-egress-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-blk"/></marker><marker id="fl-egress-v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-vpn"/></marker></defs>
+<rect x="10" y="76" width="1160" height="514" rx="14" class="gcp"/>
+<rect x="100" y="16" width="240" height="46" rx="10" class="box"/>
+<text x="220" y="44" text-anchor="middle" class="t">Internet</text>
+<rect x="420" y="16" width="240" height="46" rx="10" class="box"/>
+<text x="540" y="37" text-anchor="middle" class="t">Máy admin</text>
+<text x="540" y="54" text-anchor="middle" class="mono dim">10.50.0.2 (VPN)</text>
+<rect x="20" y="240" width="310" height="336" rx="10" class="z-dmz"/>
+<text x="34" y="262" class="t c-dmz">VPC DMZ</text>
+<text x="34" y="280" class="mono dim">10.10.10.0/24</text>
+<rect x="350" y="240" width="480" height="336" rx="10" class="z-lan"/>
+<text x="364" y="262" class="t c-lan">VPC LAN</text>
+<text x="364" y="280" class="mono dim">10.20.0.0/24</text>
+<rect x="850" y="240" width="310" height="336" rx="10" class="z-mgmt"/>
+<text x="864" y="262" class="t c-mgmt">VPC MGMT</text>
+<text x="864" y="280" class="mono dim">10.40.0.0/24</text>
+<rect x="80" y="100" width="280" height="70" rx="10" class="box-fw"/>
+<text x="220" y="128" text-anchor="middle" class="t">firewall-edge-01 · BIÊN</text>
+<text x="220" y="150" text-anchor="middle" class="mono dim">NAT · port fwd · VPN wg0</text>
+<rect x="560" y="100" width="340" height="70" rx="10" class="box-fw"/>
+<text x="730" y="128" text-anchor="middle" class="t">firewall-core-01 · CORE</text>
+<text x="730" y="150" text-anchor="middle" class="mono dim">lọc vào trong · không NAT</text>
+<rect x="40" y="300" width="270" height="64" rx="8" class="box"/>
+<text x="54" y="323" class="t">edge-01 · LB + WAF</text>
+<text x="54" y="342" class="mono dim">10.10.10.10</text>
+<rect x="370" y="300" width="210" height="64" rx="8" class="box"/>
+<text x="384" y="323" class="t">k8s-master-01</text>
+<text x="384" y="342" class="mono dim">10.20.0.11 · VIP .10</text>
+<rect x="600" y="300" width="210" height="64" rx="8" class="box"/>
+<text x="614" y="323" class="t">k8s-worker-01</text>
+<text x="614" y="342" class="mono dim">10.20.0.21 · GW .200/.210</text>
+<rect x="370" y="470" width="440" height="80" rx="8" class="box"/>
+<text x="384" y="493" class="t">infra-01</text>
+<text x="384" y="512" class="mono dim">Harbor :443 · Squid :3128 · S3 :3900 · Loki :3100</text>
+<rect x="870" y="300" width="270" height="64" rx="8" class="box"/>
+<text x="884" y="323" class="t">jump-01 · bastion</text>
+<text x="884" y="342" class="mono dim">10.40.0.20</text>
+<rect x="870" y="440" width="270" height="100" rx="8" class="box"/>
+<text x="884" y="463" class="t">siem-01 · SIEM</text>
+<text x="884" y="482" class="mono dim">Alloy :1514 · Wazuh :1515/16</text>
+<text x="884" y="500" class="mono dim">Grafana · Mailpit</text>
+<polyline points="475,366 475,466" class="flow" marker-end="url(#fl-egress-a)"/>
+<polyline points="705,366 705,466" class="flow" marker-end="url(#fl-egress-a)"/>
+<text x="590" y="424" text-anchor="middle" class="mono lb">image → Harbor :443 · apt/helm → Squid :3128 (cùng subnet)</text>
+<polyline points="590,466 590,200 650,200 650,174" class="flow" marker-end="url(#fl-egress-a)"/>
+<text x="598" y="194" text-anchor="start" class="mono lb">#140 core</text>
+<polyline points="558,135 364,135" class="flow" marker-end="url(#fl-egress-a)"/>
+<text x="461" y="126" text-anchor="middle" class="mono lb">#20 biên + NAT</text>
+<polyline points="220,98 220,66" class="flow" marker-end="url(#fl-egress-a)"/>
+<text x="228" y="88" text-anchor="start" class="mono lb">NAT ra IP public</text>
+<polyline points="210,298 210,174" class="flow" marker-end="url(#fl-egress-a)"/>
+<text x="216" y="214" text-anchor="start" class="mono lb">#10 biên: apt, Docker Hub</text>
+<polyline points="1005,298 1005,150 904,150" class="flow" marker-end="url(#fl-egress-a)"/>
+<text x="999" y="214" text-anchor="end" class="mono lb">#220 core → Squid/Harbor</text>
+<polyline points="838,172 838,520 814,520" class="flow" marker-end="url(#fl-egress-a)"/>
+<polyline points="440,298 440,186 570,186 570,174" class="blk" marker-end="url(#fl-egress-b)"/>
+<text x="446" y="236" text-anchor="start" class="mono lb-blk">✕ #190 node ra thẳng</text>
+<polyline points="1130,298 1130,120 904,120" class="blk" marker-end="url(#fl-egress-b)"/>
+<text x="1124" y="112" text-anchor="end" class="mono lb-blk">✕ #290 MGMT ra thẳng</text>
+</svg>
+</div>
+<div class="legend"><span><i class="sw req"></i>luồng được phép (ghi luật # và firewall)</span><span><i class="sw blk"></i>bị chặn</span></div>
+<figcaption>Node trong LAN không có đường ra Internet: image đi qua Harbor (proxy-cache), gói apt/Helm đi qua Squid với allowlist tên miền. infra-01 là máy LAN duy nhất được ra: core cho (#140), biên cho tiếp (#20) và NAT (Source NAT hybrid — NAT tự động không gồm dải sau core). Core không NAT, nên biên thấy đúng IP 10.20.0.30 để lọc. MGMT mượn Squid/Harbor (#220 ở core). DMZ ra thẳng qua biên (#10).</figcaption>
+</figure>
+<h3 id="fl-logs">Log và cảnh báo: mọi máy và 2 firewall → siem-01</h3>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 1180 600" role="img" aria-label="Mọi máy gửi syslog và sự kiện Wazuh về siem-01 qua firewall core; firewall biên gửi syslog qua core; siem-01 ghi bản sao log sang infra-01 và đọc Prometheus qua Gateway internal; cảnh báo gửi Mailpit.">
+<defs><marker id="fl-logs-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-flow"/></marker><marker id="fl-logs-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-blk"/></marker><marker id="fl-logs-v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-vpn"/></marker></defs>
+<rect x="10" y="76" width="1160" height="514" rx="14" class="gcp"/>
+<rect x="100" y="16" width="240" height="46" rx="10" class="box"/>
+<text x="220" y="44" text-anchor="middle" class="t">Internet</text>
+<rect x="420" y="16" width="240" height="46" rx="10" class="box"/>
+<text x="540" y="37" text-anchor="middle" class="t">Máy admin</text>
+<text x="540" y="54" text-anchor="middle" class="mono dim">10.50.0.2 (VPN)</text>
+<rect x="20" y="240" width="310" height="336" rx="10" class="z-dmz"/>
+<text x="34" y="262" class="t c-dmz">VPC DMZ</text>
+<text x="34" y="280" class="mono dim">10.10.10.0/24</text>
+<rect x="350" y="240" width="480" height="336" rx="10" class="z-lan"/>
+<text x="364" y="262" class="t c-lan">VPC LAN</text>
+<text x="364" y="280" class="mono dim">10.20.0.0/24</text>
+<rect x="850" y="240" width="310" height="336" rx="10" class="z-mgmt"/>
+<text x="864" y="262" class="t c-mgmt">VPC MGMT</text>
+<text x="864" y="280" class="mono dim">10.40.0.0/24</text>
+<rect x="80" y="100" width="280" height="70" rx="10" class="box-fw"/>
+<text x="220" y="128" text-anchor="middle" class="t">firewall-edge-01 · BIÊN</text>
+<text x="220" y="150" text-anchor="middle" class="mono dim">syslog của biên → siem-01</text>
+<rect x="560" y="100" width="340" height="70" rx="10" class="box-fw"/>
+<text x="730" y="128" text-anchor="middle" class="t">firewall-core-01 · CORE</text>
+<text x="730" y="150" text-anchor="middle" class="mono dim">syslog của core → siem-01</text>
+<rect x="40" y="300" width="270" height="64" rx="8" class="box"/>
+<text x="54" y="323" class="t">edge-01 · LB + WAF</text>
+<text x="54" y="342" class="mono dim">10.10.10.10</text>
+<rect x="370" y="300" width="210" height="64" rx="8" class="box"/>
+<text x="384" y="323" class="t">k8s-master-01</text>
+<text x="384" y="342" class="mono dim">10.20.0.11 · VIP .10</text>
+<rect x="600" y="300" width="210" height="64" rx="8" class="box"/>
+<text x="614" y="323" class="t">k8s-worker-01</text>
+<text x="614" y="342" class="mono dim">10.20.0.21 · GW .200/.210</text>
+<rect x="370" y="470" width="440" height="80" rx="8" class="box"/>
+<text x="384" y="493" class="t">infra-01</text>
+<text x="384" y="512" class="mono dim">Harbor :443 · Squid :3128 · S3 :3900 · Loki :3100</text>
+<rect x="870" y="300" width="270" height="64" rx="8" class="box"/>
+<text x="884" y="323" class="t">jump-01 · bastion</text>
+<text x="884" y="342" class="mono dim">10.40.0.20</text>
+<rect x="870" y="440" width="270" height="100" rx="8" class="box"/>
+<text x="884" y="463" class="t">siem-01 · SIEM</text>
+<text x="884" y="482" class="mono dim">Alloy :1514 · Wazuh :1515/16</text>
+<text x="884" y="500" class="mono dim">Grafana → luật cảnh báo → Mailpit</text>
+<polyline points="290,298 290,232 480,232 480,160 556,160" class="flow" marker-end="url(#fl-logs-a)"/>
+<text x="296" y="224" text-anchor="start" class="mono lb">#25/#26 core: syslog, Wazuh</text>
+<polyline points="364,128 556,128" class="flow" marker-end="url(#fl-logs-a)"/>
+<text x="461" y="120" text-anchor="middle" class="mono lb">#27 core: syslog biên</text>
+<polyline points="475,298 475,214 700,214 700,174" class="flow" marker-end="url(#fl-logs-a)"/>
+<polyline points="705,298 705,232 760,232 760,174" class="flow" marker-end="url(#fl-logs-a)"/>
+<polyline points="600,466 600,214" class="flow" marker-end="url(#fl-logs-a)"/>
+<text x="608" y="206" text-anchor="start" class="mono lb">#160/#165 core</text>
+<polyline points="904,135 1150,135 1150,490 1142,490" class="flow" marker-end="url(#fl-logs-a)"/>
+<text x="1144" y="214" text-anchor="end" class="mono lb">→ siem-01 :1514, :1515/16</text>
+<polyline points="1005,366 1005,438" class="flow" marker-end="url(#fl-logs-a)"/>
+<text x="1012" y="406" text-anchor="start" class="mono lb">cùng subnet</text>
+<polyline points="868,500 858,500 858,174" class="flow" marker-end="url(#fl-logs-a)"/>
+<polyline points="838,172 838,520 814,520" class="flow" marker-end="url(#fl-logs-a)"/>
+<text x="806" y="566" text-anchor="end" class="mono lb">#220 core: Loki bản sao :3100 (90 ngày)</text>
+<polyline points="680,172 680,298" class="flow" marker-end="url(#fl-logs-a)"/>
+<text x="686" y="290" text-anchor="start" class="mono lb">#215 → Prometheus .210</text>
+</svg>
+</div>
+<div class="legend"><span><i class="sw req"></i>luồng được phép (ghi luật # và firewall)</span></div>
+<figcaption>rsyslog trên mọi máy Linux gửi journal, auth, auditd (kể cả phiên SSH trên jump-01) theo RFC5424 về Alloy :1514; Wazuh agent gửi tới manager :1515/1516. edge-01 đi thẳng sang core (route VPC DMZ), không qua biên; biên gửi syslog của chính nó qua core (#27). Alloy ghi vào Loki trên siem-01 (30 ngày) và bản sao trên infra-01 (90 ngày). Grafana chạy luật cảnh báo trên log + metric và gửi email tới Mailpit.</figcaption>
+</figure>
+<h3 id="fl-admin">Quản trị: VPN (biên) → jump-01 → máy trong</h3>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 1180 600" role="img" aria-label="Máy admin vào WireGuard trên firewall biên; VPN chỉ được tới jump-01 cổng 22 (qua core) và GUI/API của 2 firewall; từ jump-01 mới SSH, kubectl, web tới các máy khác qua core, và tới GUI firewall biên qua core rồi biên; VPN đi thẳng tới máy khác bị chặn ngay ở biên.">
+<defs><marker id="fl-admin-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-flow"/></marker><marker id="fl-admin-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-blk"/></marker><marker id="fl-admin-v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-vpn"/></marker></defs>
+<rect x="10" y="76" width="1160" height="514" rx="14" class="gcp"/>
+<rect x="100" y="16" width="240" height="46" rx="10" class="box"/>
+<text x="220" y="44" text-anchor="middle" class="t">Internet</text>
+<rect x="420" y="16" width="240" height="46" rx="10" class="box"/>
+<text x="540" y="37" text-anchor="middle" class="t">Máy admin</text>
+<text x="540" y="54" text-anchor="middle" class="mono dim">10.50.0.2 (VPN)</text>
+<rect x="20" y="240" width="310" height="336" rx="10" class="z-dmz"/>
+<text x="34" y="262" class="t c-dmz">VPC DMZ</text>
+<text x="34" y="280" class="mono dim">10.10.10.0/24</text>
+<rect x="350" y="240" width="480" height="336" rx="10" class="z-lan"/>
+<text x="364" y="262" class="t c-lan">VPC LAN</text>
+<text x="364" y="280" class="mono dim">10.20.0.0/24</text>
+<rect x="850" y="240" width="310" height="336" rx="10" class="z-mgmt"/>
+<text x="864" y="262" class="t c-mgmt">VPC MGMT</text>
+<text x="864" y="280" class="mono dim">10.40.0.0/24</text>
+<rect x="80" y="100" width="280" height="70" rx="10" class="box-fw"/>
+<text x="220" y="128" text-anchor="middle" class="t">firewall-edge-01 · BIÊN</text>
+<text x="220" y="150" text-anchor="middle" class="mono dim">wg0 10.50.0.1 · GUI :443 (#304)</text>
+<rect x="560" y="100" width="340" height="70" rx="10" class="box-fw"/>
+<text x="730" y="128" text-anchor="middle" class="t">firewall-core-01 · CORE</text>
+<text x="730" y="150" text-anchor="middle" class="mono dim">GUI :443 (#42) · DNS (#43)</text>
+<rect x="40" y="300" width="270" height="64" rx="8" class="box"/>
+<text x="54" y="323" class="t">edge-01 · LB + WAF</text>
+<text x="54" y="342" class="mono dim">10.10.10.10</text>
+<rect x="370" y="300" width="210" height="64" rx="8" class="box"/>
+<text x="384" y="323" class="t">k8s-master-01</text>
+<text x="384" y="342" class="mono dim">10.20.0.11 · VIP .10</text>
+<rect x="600" y="300" width="210" height="64" rx="8" class="box"/>
+<text x="614" y="323" class="t">k8s-worker-01</text>
+<text x="614" y="342" class="mono dim">10.20.0.21 · GW .200/.210</text>
+<rect x="370" y="470" width="440" height="80" rx="8" class="box"/>
+<text x="384" y="493" class="t">infra-01</text>
+<text x="384" y="512" class="mono dim">Harbor :443 · Squid :3128 · S3 :3900 · Loki :3100</text>
+<rect x="870" y="300" width="270" height="64" rx="8" class="box"/>
+<text x="884" y="323" class="t">jump-01 · bastion</text>
+<text x="884" y="342" class="mono dim">10.40.0.20</text>
+<rect x="870" y="440" width="270" height="100" rx="8" class="box"/>
+<text x="884" y="463" class="t">siem-01 · SIEM</text>
+<text x="884" y="482" class="mono dim">Alloy :1514 · Wazuh :1515/16</text>
+<text x="884" y="500" class="mono dim">Grafana :3000 · Mailpit :8025</text>
+<polyline points="540,64 540,112 364,112" class="vpn" marker-end="url(#fl-admin-v)"/>
+<text x="548" y="88" text-anchor="start" class="mono lb-vpn">WireGuard udp 51820 → IP VPN → wg0 (biên)</text>
+<polyline points="364,150 556,150" class="vpn" marker-end="url(#fl-admin-v)"/>
+<text x="461" y="142" text-anchor="middle" class="mono lb-vpn">#300/#303 biên</text>
+<polyline points="904,120 1100,120 1100,298" class="vpn" marker-end="url(#fl-admin-v)"/>
+<text x="1094" y="226" text-anchor="end" class="mono lb-vpn">#40 core :22</text>
+<polyline points="960,298 960,160 904,160" class="flow" marker-end="url(#fl-admin-a)"/>
+<text x="954" y="226" text-anchor="end" class="mono lb">#205 :22 :443 :6443 :3000 :8025</text>
+<polyline points="700,172 700,214 475,214 475,298" class="flow" marker-end="url(#fl-admin-a)"/>
+<polyline points="760,172 760,232 705,232 705,298" class="flow" marker-end="url(#fl-admin-a)"/>
+<polyline points="590,172 590,466" class="flow" marker-end="url(#fl-admin-a)"/>
+<polyline points="556,162 480,162 480,232 300,232 300,298" class="flow" marker-end="url(#fl-admin-a)"/>
+<text x="306" y="224" text-anchor="start" class="mono lb">từ jump-01: SSH, web</text>
+<polyline points="480,200 330,200 330,174" class="flow" marker-end="url(#fl-admin-a)"/>
+<text x="336" y="194" text-anchor="start" class="mono lb">#30 biên: GUI</text>
+<polyline points="1005,366 1005,438" class="flow" marker-end="url(#fl-admin-a)"/>
+<text x="1012" y="406" text-anchor="start" class="mono lb">cùng subnet</text>
+<polyline points="250,174 250,238" class="blk" marker-end="url(#fl-admin-b)"/>
+<text x="244" y="206" text-anchor="end" class="mono lb-blk">✕ #309 (biên): VPN →</text>
+<text x="244" y="222" text-anchor="end" class="mono lb-blk">edge-01, máy khác</text>
+</svg>
+</div>
+<div class="legend"><span><i class="sw vpn"></i>VPN quản trị</span><span><i class="sw req"></i>luồng được phép (ghi luật # và firewall)</span><span><i class="sw blk"></i>bị chặn</span></div>
+<figcaption>Tunnel kết thúc ở wg0 trên <b>biên</b>. Biên chỉ cho VPN tới jump-01:22 (#300), GUI/API core (#303) và GUI/API biên (#304), chặn phần còn lại (#309); core lọc lần nữa (#40 jump-01, #42 GUI core, #43 DNS nội bộ). Từ jump-01, core cho các cổng quản trị (#205) tới LAN, edge-01 và cả GUI biên — biên kiểm thêm lần nữa (#30). <code>./lab.sh ssh</code>, <code>scp</code> và Ansible dùng ProxyCommand qua jump-01; <code>./lab.sh tunnel up</code> mở SOCKS qua jump-01 cho trình duyệt và kubectl. Luật #205 (core) giới hạn jump-01 ở cổng quản trị. Phiên SSH trên jump-01 được ghi (pam_tty_audit → auditd → siem-01).</figcaption>
+</figure>
+<h3 id="fl-backup">Backup: etcd, Velero, log</h3>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 1180 600" role="img" aria-label="etcd được snapshot hằng ngày trên k8s-master-01 và kéo về máy admin qua 2 firewall; Velero backup tài nguyên cluster vào Garage S3 trên infra-01; log được nhân bản sang infra-01.">
+<defs><marker id="fl-backup-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-flow"/></marker><marker id="fl-backup-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-blk"/></marker><marker id="fl-backup-v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-vpn"/></marker></defs>
+<rect x="10" y="76" width="1160" height="514" rx="14" class="gcp"/>
+<rect x="100" y="16" width="240" height="46" rx="10" class="box"/>
+<text x="220" y="44" text-anchor="middle" class="t">Internet</text>
+<rect x="420" y="16" width="240" height="46" rx="10" class="box"/>
+<text x="540" y="37" text-anchor="middle" class="t">Máy admin</text>
+<text x="540" y="54" text-anchor="middle" class="mono dim">10.50.0.2 (VPN)</text>
+<rect x="20" y="240" width="310" height="336" rx="10" class="z-dmz"/>
+<text x="34" y="262" class="t c-dmz">VPC DMZ</text>
+<text x="34" y="280" class="mono dim">10.10.10.0/24</text>
+<rect x="350" y="240" width="480" height="336" rx="10" class="z-lan"/>
+<text x="364" y="262" class="t c-lan">VPC LAN</text>
+<text x="364" y="280" class="mono dim">10.20.0.0/24</text>
+<rect x="850" y="240" width="310" height="336" rx="10" class="z-mgmt"/>
+<text x="864" y="262" class="t c-mgmt">VPC MGMT</text>
+<text x="864" y="280" class="mono dim">10.40.0.0/24</text>
+<rect x="80" y="100" width="280" height="70" rx="10" class="box-fw"/>
+<text x="220" y="128" text-anchor="middle" class="t">firewall-edge-01 · BIÊN</text>
+<text x="220" y="150" text-anchor="middle" class="mono dim">NAT · port fwd · VPN wg0</text>
+<rect x="560" y="100" width="340" height="70" rx="10" class="box-fw"/>
+<text x="730" y="128" text-anchor="middle" class="t">firewall-core-01 · CORE</text>
+<text x="730" y="150" text-anchor="middle" class="mono dim">lọc vào trong · không NAT</text>
+<rect x="40" y="300" width="270" height="64" rx="8" class="box"/>
+<text x="54" y="323" class="t">edge-01 · LB + WAF</text>
+<text x="54" y="342" class="mono dim">10.10.10.10</text>
+<rect x="370" y="300" width="210" height="64" rx="8" class="box"/>
+<text x="384" y="323" class="t">k8s-master-01</text>
+<text x="384" y="342" class="mono dim">10.20.0.11 · VIP .10</text>
+<rect x="600" y="300" width="210" height="64" rx="8" class="box"/>
+<text x="614" y="323" class="t">k8s-worker-01</text>
+<text x="614" y="342" class="mono dim">10.20.0.21 · GW .200/.210</text>
+<rect x="370" y="470" width="440" height="80" rx="8" class="box"/>
+<text x="384" y="493" class="t">infra-01</text>
+<text x="384" y="512" class="mono dim">Harbor :443 · Squid :3128 · S3 :3900 · Loki :3100</text>
+<rect x="870" y="300" width="270" height="64" rx="8" class="box"/>
+<text x="884" y="323" class="t">jump-01 · bastion</text>
+<text x="884" y="342" class="mono dim">10.40.0.20</text>
+<rect x="870" y="440" width="270" height="100" rx="8" class="box"/>
+<text x="884" y="463" class="t">siem-01 · SIEM</text>
+<text x="884" y="482" class="mono dim">Alloy :1514 · Wazuh :1515/16</text>
+<text x="884" y="500" class="mono dim">Loki 30 ngày</text>
+<text x="378" y="380" text-anchor="start" class="mono lb">etcd snapshot 02:00 → /var/backups/etcd (7 bản)</text>
+<polyline points="705,366 705,466" class="flow" marker-end="url(#fl-backup-a)"/>
+<text x="712" y="424" text-anchor="start" class="mono lb">Velero 02:00 → S3 (7 ngày)</text>
+<polyline points="520,298 520,196 640,196 640,174" class="vpn" marker-end="url(#fl-backup-v)"/>
+<polyline points="556,150 364,150" class="vpn" marker-end="url(#fl-backup-v)"/>
+<polyline points="364,118 500,118 500,66" class="vpn" marker-end="url(#fl-backup-v)"/>
+<text x="508" y="92" text-anchor="start" class="mono lb-vpn">Ansible fetch → out/backups (qua jump-01)</text>
+<polyline points="868,500 858,500 858,174" class="flow" marker-end="url(#fl-backup-a)"/>
+<polyline points="838,172 838,520 814,520" class="flow" marker-end="url(#fl-backup-a)"/>
+<text x="806" y="566" text-anchor="end" class="mono lb">#220 core: log → Loki bản sao (90 ngày)</text>
+</svg>
+</div>
+<div class="legend"><span><i class="sw req"></i>luồng được phép (ghi luật # và firewall)</span><span><i class="sw vpn"></i>VPN quản trị</span></div>
+<figcaption>Ba lớp: <b>etcd</b> (toàn bộ trạng thái cluster) snapshot 02:00 trên master, giữ 7 bản, và <code>60-security.yml</code> kéo bản mới nhất về <code>out/backups</code>; khôi phục bằng <code>ops-etcd-restore.yml</code>. <b>Velero</b> backup theo namespace vào Garage S3 trên infra-01 (cùng subnet, không qua firewall). <b>Log</b> có bản sao 90 ngày trên infra-01, khác máy với siem-01. On-prem thật cần thêm bản sao ngoài site.</figcaption>
+</figure>
+<h3 id="fl-k8s">Bên trong cluster</h3>
+<figure>
+<div class="scroll">
+<svg viewBox="0 0 1180 520" role="img" aria-label="Cluster gồm k8s-master-01 (apiserver sau VIP kube-vip, etcd mã hoá, Kyverno, Pod Security) và k8s-worker-01 (2 Gateway Envoy, whoami, Prometheus, cert-manager, Velero, MetalLB); Cilium nối pod trên mọi node; edge-01 vào Gateway public, siem-01 vào Gateway internal, jump-01 gọi API qua VIP.">
+<defs><marker id="fl-k8s-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-flow"/></marker><marker id="fl-k8s-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-blk"/></marker><marker id="fl-k8s-v" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="m-vpn"/></marker></defs>
+<rect x="20" y="90" width="1140" height="430" rx="10" class="z-lan"/>
+<text x="34" y="112" class="t c-lan">Cluster K8s v1.37 · VPC LAN</text>
+<rect x="300" y="10" width="220" height="46" rx="6" class="box"/>
+<text x="310" y="29" class="t">jump-01 (MGMT)</text>
+<text x="310" y="46" class="mono dim">kubectl qua SOCKS</text>
+<rect x="600" y="10" width="220" height="46" rx="6" class="box"/>
+<text x="610" y="29" class="t">edge-01 (DMZ)</text>
+<text x="610" y="46" class="mono dim">HAProxy + WAF</text>
+<rect x="880" y="10" width="220" height="46" rx="6" class="box"/>
+<text x="890" y="29" class="t">siem-01 (MGMT)</text>
+<text x="890" y="46" class="mono dim">Grafana</text>
+<rect x="40" y="128" width="500" height="300" rx="8" class="box"/>
+<text x="54" y="150" class="t">k8s-master-01 · control-plane</text>
+<rect x="60" y="164" width="220" height="46" rx="6" class="box"/>
+<text x="70" y="183" class="t">kube-apiserver :6443</text>
+<text x="70" y="200" class="mono dim">audit log → siem-01</text>
+<rect x="300" y="164" width="220" height="46" rx="6" class="box"/>
+<text x="310" y="183" class="t">kube-vip</text>
+<text x="310" y="200" class="mono dim">VIP 10.20.0.10 (alias IP)</text>
+<rect x="60" y="224" width="220" height="46" rx="6" class="box"/>
+<text x="70" y="243" class="t">etcd</text>
+<text x="70" y="260" class="mono dim">Secret mã hoá · snapshot 02:00</text>
+<rect x="300" y="224" width="220" height="46" rx="6" class="box"/>
+<text x="310" y="243" class="t">scheduler · controller</text>
+<rect x="60" y="284" width="460" height="46" rx="6" class="box"/>
+<text x="70" y="303" class="t">Kyverno (admission webhook)</text>
+<text x="70" y="320" class="mono dim">ns có lab/policy=strict: chỉ image harbor.lab.internal/*</text>
+<rect x="60" y="344" width="460" height="46" rx="6" class="box"/>
+<text x="70" y="363" class="t">Pod Security restricted</text>
+<text x="70" y="380" class="mono dim">default, demo, gateway, cert-manager</text>
+<rect x="560" y="128" width="580" height="300" rx="8" class="box"/>
+<text x="574" y="150" class="t">k8s-worker-01 · worker</text>
+<rect x="580" y="164" width="260" height="46" rx="6" class="waf"/>
+<text x="590" y="183" class="t">Gateway public .200</text>
+<text x="590" y="200" class="mono dim">Envoy · *.apps.lab.internal</text>
+<rect x="860" y="164" width="260" height="46" rx="6" class="box"/>
+<text x="870" y="183" class="t">Gateway internal .210</text>
+<text x="870" y="200" class="mono dim">Envoy · *.int.lab.internal</text>
+<rect x="580" y="244" width="260" height="46" rx="6" class="box"/>
+<text x="590" y="263" class="t">whoami ×2 (ns demo)</text>
+<text x="590" y="280" class="mono dim">CNP: chỉ nhận từ Envoy</text>
+<rect x="860" y="244" width="260" height="46" rx="6" class="box"/>
+<text x="870" y="263" class="t">Prometheus (ns monitoring)</text>
+<text x="870" y="280" class="mono dim">node-exporter, kube-state</text>
+<rect x="580" y="314" width="170" height="46" rx="6" class="box"/>
+<text x="590" y="333" class="t">cert-manager</text>
+<text x="590" y="350" class="mono dim">issuer lab-ca</text>
+<rect x="765" y="314" width="170" height="46" rx="6" class="box"/>
+<text x="775" y="333" class="t">Velero</text>
+<text x="775" y="350" class="mono dim">→ S3 infra-01</text>
+<rect x="950" y="314" width="170" height="46" rx="6" class="box"/>
+<text x="960" y="333" class="t">MetalLB</text>
+<text x="960" y="350" class="mono dim">cấp .200 / .210</text>
+<rect x="580" y="374" width="540" height="40" rx="6" class="box"/>
+<text x="590" y="393" class="t">containerd → mirror Harbor (infra-01)</text>
+<rect x="40" y="440" width="1100" height="56" rx="8" class="box"/>
+<text x="54" y="463" class="t">Cilium 1.20 (eBPF) · trên mọi node</text>
+<text x="54" y="482" class="mono dim">pod 10.244.0.0/16 · VXLAN · NetworkPolicy + CiliumNetworkPolicy (default-deny ns demo) · Gateway API (Envoy)</text>
+<polyline points="410,58 410,162" class="flow" marker-end="url(#fl-k8s-a)"/>
+<text x="418" y="128" text-anchor="start" class="mono lb">kubectl → VIP :6443</text>
+<polyline points="710,58 710,162" class="flow" marker-end="url(#fl-k8s-a)"/>
+<text x="718" y="128" text-anchor="start" class="mono lb">HTTPS đã qua WAF → .200:443 (core #10)</text>
+<polyline points="710,212 710,242" class="flow" marker-end="url(#fl-k8s-a)"/>
+<polyline points="990,58 990,162" class="flow" marker-end="url(#fl-k8s-a)"/>
+<text x="998" y="128" text-anchor="start" class="mono lb">#215 → .210:443</text>
+<polyline points="990,212 990,242" class="flow" marker-end="url(#fl-k8s-a)"/>
+</svg>
+</div>
+<div class="legend"><span><i class="sw req"></i>luồng được phép (ghi luật # và firewall)</span><span><i class="sw waf"></i>điểm vào từ Internet</span></div>
+<figcaption>Hai Gateway (Cilium Gateway API, Envoy) là cửa vào duy nhất của app: <b>public .200</b> chỉ nhận từ edge-01 (luật DMZ #10), <b>internal .210</b> cho LAN, VPN qua jump-01 và Grafana. IP .200/.210/.10 do MetalLB/kube-vip quản lý nhưng GCP định tuyến bằng alias IP. Pod chỉ chạy image từ Harbor (Kyverno), đạt Pod Security <code>restricted</code>, và namespace demo mặc định chặn mọi traffic trừ luồng khai báo.</figcaption>
+</figure>
+<h3 id="fl-rules">Ma trận luật 2 firewall</h3>
+<p>Sinh tự động từ <code>ansible/inventories/gcp/host_vars/firewall-{edge,core}-01.yml</code> — đúng thứ Ansible đẩy lên OPNsense. Luật xét theo card nhận gói, số nhỏ trước, khớp là dừng; cuối mỗi card là luật chặn mọi thứ còn lại (ghi log → SIEM). Ngoài bảng: ở biên có port forward WAN 80/443 → edge-01 (giữ IP client) và Source NAT hybrid cho LAN/MGMT; core tắt NAT. Firewall VPC của GCP chỉ mở WAN 80/443/51820 vào máy gắn tag <code>fw</code> (biên).</p>
+<h3>firewall-edge-01 (biên) — 17 luật</h3>
+<div class="tbl"><table>
+<thead><tr><th>#</th><th>Card vào</th><th>Nguồn</th><th>Đích</th><th>Giao thức · cổng</th><th>Hành động</th><th>Mô tả</th></tr></thead>
+<tbody>
+<tr><td class="mono">#5</td><td>WAN</td><td>bất kỳ</td><td>vpn_public_ip</td><td class="mono">UDP 51820</td><td><span class="y">cho</span></td><td>Internet → WireGuard (IP VPN)</td></tr>
+<tr><td class="mono">#300</td><td>VPN</td><td>VPN admin</td><td>jump-01</td><td class="mono">TCP 22</td><td><span class="y">cho</span></td><td>VPN admin → jump server (SSH)</td></tr>
+<tr><td class="mono">#301</td><td>VPN</td><td>VPN admin</td><td>jump-01</td><td class="mono">ICMP mọi</td><td><span class="y">cho</span></td><td>VPN admin → ping jump server</td></tr>
+<tr><td class="mono">#302</td><td>VPN</td><td>VPN admin</td><td>core (LAN .253)</td><td class="mono">TCP/UDP 53</td><td><span class="y">cho</span></td><td>VPN admin → DNS nội bộ (core)</td></tr>
+<tr><td class="mono">#303</td><td>VPN</td><td>VPN admin</td><td>core (LAN .253)</td><td class="mono">TCP 443</td><td><span class="y">cho</span></td><td>VPN admin → GUI/API firewall core</td></tr>
+<tr><td class="mono">#304</td><td>VPN</td><td>VPN admin</td><td>biên (DMZ .253)</td><td class="mono">TCP 443</td><td><span class="y">cho</span></td><td>VPN admin → GUI/API firewall biên</td></tr>
+<tr><td class="mono">#309</td><td>VPN</td><td>bất kỳ</td><td>bất kỳ</td><td class="mono">mọi</td><td><span class="n">chặn</span></td><td>VPN → còn lại: CHẶN (ghi log)</td></tr>
+<tr><td class="mono">#10</td><td>DMZ</td><td>edge-01</td><td>Internet</td><td class="mono">TCP 80, 443</td><td><span class="y">cho</span></td><td>edge-01 → Internet 80/443 (apt, Docker Hub)</td></tr>
+<tr><td class="mono">#11</td><td>DMZ</td><td>edge-01, core (DMZ .252)</td><td>biên (DMZ .253)</td><td class="mono">TCP/UDP 53</td><td><span class="y">cho</span></td><td>DMZ → DNS của firewall biên</td></tr>
+<tr><td class="mono">#12</td><td>DMZ</td><td>edge-01, core (DMZ .252)</td><td>biên (DMZ .253)</td><td class="mono">UDP 123</td><td><span class="y">cho</span></td><td>DMZ → NTP của firewall biên</td></tr>
+<tr><td class="mono">#19</td><td>DMZ</td><td>10.20.0.0/24</td><td>Internet</td><td class="mono">TCP 80, 443</td><td><span class="y">cho</span> (tạm, khi dựng)</td><td>TẠM: LAN (qua core) → Internet 80/443</td></tr>
+<tr><td class="mono">#20</td><td>DMZ</td><td>infra-01</td><td>Internet</td><td class="mono">TCP 80, 443</td><td><span class="y">cho</span></td><td>infra-01 → Internet 80/443 (đã qua core)</td></tr>
+<tr><td class="mono">#21</td><td>DMZ</td><td>core (DMZ .252)</td><td>Internet</td><td class="mono">TCP 80, 443</td><td><span class="y">cho</span></td><td>firewall core → Internet 80/443 (cập nhật)</td></tr>
+<tr><td class="mono">#22</td><td>DMZ</td><td>core (DMZ .252)</td><td>Internet</td><td class="mono">TCP/UDP 53</td><td><span class="y">cho</span></td><td>firewall core → DNS Internet (Unbound đệ quy)</td></tr>
+<tr><td class="mono">#23</td><td>DMZ</td><td>core (DMZ .252)</td><td>Internet</td><td class="mono">UDP 123</td><td><span class="y">cho</span></td><td>firewall core → NTP Internet</td></tr>
+<tr><td class="mono">#30</td><td>DMZ</td><td>jump-01</td><td>biên (DMZ .253)</td><td class="mono">TCP 22, 80, 443</td><td><span class="y">cho</span></td><td>jump-01 → quản trị firewall biên</td></tr>
+<tr><td class="mono">#39</td><td>DMZ</td><td>bất kỳ</td><td>bất kỳ</td><td class="mono">mọi</td><td><span class="n">chặn</span></td><td>DMZ → còn lại: CHẶN (ghi log)</td></tr>
+</tbody></table></div>
+<h3>firewall-core-01 (core) — 25 luật</h3>
+<div class="tbl"><table>
+<thead><tr><th>#</th><th>Card vào</th><th>Nguồn</th><th>Đích</th><th>Giao thức · cổng</th><th>Hành động</th><th>Mô tả</th></tr></thead>
+<tbody>
+<tr><td class="mono">#10</td><td>DMZ</td><td>edge-01</td><td>Gateway public .200</td><td class="mono">TCP 80, 443</td><td><span class="y">cho</span></td><td>edge-01 → Gateway public (80,443)</td></tr>
+<tr><td class="mono">#25</td><td>DMZ</td><td>edge-01</td><td>siem-01</td><td class="mono">TCP/UDP 514, 1514</td><td><span class="y">cho</span></td><td>edge-01 → siem-01 syslog</td></tr>
+<tr><td class="mono">#26</td><td>DMZ</td><td>edge-01</td><td>siem-01</td><td class="mono">TCP 1515, 1516</td><td><span class="y">cho</span></td><td>edge-01 → Wazuh manager</td></tr>
+<tr><td class="mono">#27</td><td>DMZ</td><td>biên (DMZ .253)</td><td>siem-01</td><td class="mono">TCP 1514</td><td><span class="y">cho</span></td><td>firewall biên → siem-01 syslog</td></tr>
+<tr><td class="mono">#40</td><td>DMZ</td><td>VPN admin</td><td>jump-01</td><td class="mono">TCP 22</td><td><span class="y">cho</span></td><td>VPN admin (qua biên) → jump server</td></tr>
+<tr><td class="mono">#41</td><td>DMZ</td><td>VPN admin</td><td>jump-01</td><td class="mono">ICMP mọi</td><td><span class="y">cho</span></td><td>VPN admin (qua biên) → ping jump server</td></tr>
+<tr><td class="mono">#42</td><td>DMZ</td><td>VPN admin</td><td>core (LAN .253)</td><td class="mono">TCP 443</td><td><span class="y">cho</span></td><td>VPN admin (qua biên) → GUI/API firewall core</td></tr>
+<tr><td class="mono">#43</td><td>DMZ</td><td>VPN admin</td><td>core (LAN .253)</td><td class="mono">TCP/UDP 53</td><td><span class="y">cho</span></td><td>VPN admin (qua biên) → DNS nội bộ</td></tr>
+<tr><td class="mono">#49</td><td>DMZ</td><td>bất kỳ</td><td>bất kỳ</td><td class="mono">mọi</td><td><span class="n">chặn</span></td><td>DMZ → vào trong: CHẶN (ghi log)</td></tr>
+<tr><td class="mono">#100</td><td>LAN</td><td>LAN</td><td>core (LAN .253)</td><td class="mono">TCP/UDP 53</td><td><span class="y">cho</span></td><td>LAN → DNS của OPNsense</td></tr>
+<tr><td class="mono">#110</td><td>LAN</td><td>LAN</td><td>core (LAN .253)</td><td class="mono">UDP 123</td><td><span class="y">cho</span></td><td>LAN → NTP của OPNsense</td></tr>
+<tr><td class="mono">#120</td><td>LAN</td><td>LAN</td><td>bất kỳ</td><td class="mono">ICMP mọi</td><td><span class="y">cho</span></td><td>LAN → ICMP (ping để debug)</td></tr>
+<tr><td class="mono">#130</td><td>LAN</td><td>LAN</td><td>DMZ</td><td class="mono">TCP 22, 80, 443</td><td><span class="y">cho</span></td><td>LAN → DMZ quản trị (22,80,443)</td></tr>
+<tr><td class="mono">#140</td><td>LAN</td><td>infra-01</td><td>bất kỳ</td><td class="mono">TCP 80, 443</td><td><span class="y">cho</span></td><td>infra-01 → Internet 80/443 (Harbor, Squid)</td></tr>
+<tr><td class="mono">#150</td><td>LAN</td><td>LAN</td><td>bất kỳ</td><td class="mono">TCP 80, 443</td><td><span class="y">cho</span> (tạm, khi dựng)</td><td>TẠM: LAN → Internet 80/443</td></tr>
+<tr><td class="mono">#160</td><td>LAN</td><td>LAN</td><td>siem-01</td><td class="mono">TCP/UDP 514, 1514</td><td><span class="y">cho</span></td><td>LAN → siem-01 syslog</td></tr>
+<tr><td class="mono">#165</td><td>LAN</td><td>LAN</td><td>siem-01</td><td class="mono">TCP 1515, 1516</td><td><span class="y">cho</span></td><td>LAN → Wazuh manager</td></tr>
+<tr><td class="mono">#190</td><td>LAN</td><td>LAN</td><td>bất kỳ</td><td class="mono">mọi</td><td><span class="n">chặn</span></td><td>LAN → mọi nơi khác: CHẶN (ghi log)</td></tr>
+<tr><td class="mono">#200</td><td>MGMT</td><td>MGMT</td><td>core (MGMT .253)</td><td class="mono">TCP/UDP 53</td><td><span class="y">cho</span></td><td>MGMT → DNS của OPNsense</td></tr>
+<tr><td class="mono">#205</td><td>MGMT</td><td>jump-01</td><td>mọi IP nội bộ</td><td class="mono">TCP 22, 80, 443, 3000, 6443, 8025</td><td><span class="y">cho</span></td><td>jump server → máy trong (quản trị)</td></tr>
+<tr><td class="mono">#206</td><td>MGMT</td><td>jump-01</td><td>mọi IP nội bộ</td><td class="mono">ICMP mọi</td><td><span class="y">cho</span></td><td>jump server → ping</td></tr>
+<tr><td class="mono">#210</td><td>MGMT</td><td>MGMT</td><td>core (MGMT .253)</td><td class="mono">UDP 123</td><td><span class="y">cho</span></td><td>MGMT → NTP của OPNsense</td></tr>
+<tr><td class="mono">#215</td><td>MGMT</td><td>siem-01</td><td>Gateway internal .210</td><td class="mono">TCP 443</td><td><span class="y">cho</span></td><td>siem-01 → Gateway internal (Grafana đọc Prometheus)</td></tr>
+<tr><td class="mono">#220</td><td>MGMT</td><td>MGMT</td><td>infra-01</td><td class="mono">TCP 443, 3128, 3100</td><td><span class="y">cho</span></td><td>MGMT → Harbor, Squid</td></tr>
+<tr><td class="mono">#290</td><td>MGMT</td><td>MGMT</td><td>bất kỳ</td><td class="mono">mọi</td><td><span class="n">chặn</span></td><td>MGMT → mọi nơi khác: CHẶN (ghi log)</td></tr>
+</tbody></table></div>
+</section>
+<!-- CHI-TIET:END -->
+
+<section id="gcp">
+  <h2>Phần nào bắt buộc dùng GCP</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Bắt buộc dùng của Google</th><th>Vì sao</th><th>Tự làm như on-prem</th></tr></thead>
+    <tbody>
+      <tr><td>VM, đĩa pd-balanced, image Ubuntu</td><td>Không có phần cứng riêng</td><td>OPNsense: firewall, NAT, DNS (Unbound), NTP, VPN</td></tr>
+      <tr><td>4 VPC + subnet</td><td>Máy nhiều card: mỗi card một VPC</td><td>HAProxy + WAF ở DMZ (thay Load Balancer, Cloud Armor của Google)</td></tr>
+      <tr><td>Route 0.0.0.0/0 → .253</td><td>Thay "default gateway = firewall"</td><td>kube-vip, MetalLB, Cilium Gateway</td></tr>
+      <tr><td>VPC firewall (mở rộng, lọc thật ở OPNsense)</td><td>Không tắt được</td><td>Harbor, Squid (thay Artifact Registry, Cloud NAT)</td></tr>
+      <tr><td>1 IP public tĩnh</td><td>Cửa vào duy nhất</td><td>Loki, Grafana, Wazuh (thay Cloud Logging)</td></tr>
+      <tr><td>Alias IP (.10, .200, .210)</td><td>VPC không cho ARP tự do</td><td>WireGuard + jump server (thay IAP)</td></tr>
+      <tr><td>Serial console, metadata</td><td>Chỉ dùng lúc bootstrap/cứu hộ</td><td>DNS nội bộ <code>lab.internal</code> (thay Cloud DNS)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="diff">
+  <h2>Khác bản chạy KVM ở đâu và vì sao</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Điểm</th><th>Bản KVM (local)</th><th>GCP</th><th>Lý do</th></tr></thead>
+    <tbody>
+      <tr><td>IP firewall trong vùng</td><td class="mono">.254 / .1</td><td class="mono">.253</td><td>GCP giữ .0, .1, .254, .255 của mỗi subnet.</td></tr>
+      <tr><td>Firewall tới VM cùng vùng</td><td>ARP trực tiếp</td><td>Qua gateway .1 (far gateway) + route /25</td><td>GCP không trả lời ARP giữa các VM; route /25 cụ thể hơn /24 nên thắng, route host tới .1 tránh lặp.</td></tr>
+      <tr><td>Default gateway của VM</td><td>OPNsense (netplan)</td><td>DHCP của VPC, route VPC trỏ vào OPNsense</td><td>Định tuyến nằm ở VPC, VM chỉ cần DNS = OPNsense.</td></tr>
+      <tr><td>VIP API, IP MetalLB</td><td>ARP do kube-vip / MetalLB</td><td>Alias IP trên k8s-master-01 / k8s-worker-01</td><td>VPC bỏ qua ARP của guest; kube-vip, MetalLB vẫn chạy nguyên cấu hình.</td></tr>
+      <tr><td>MTU</td><td class="mono">1500</td><td class="mono">1460 (WireGuard 1380)</td><td>MTU mặc định của VPC.</td></tr>
+      <tr><td>Đồng bộ giờ</td><td>systemd-timesyncd</td><td>chrony → OPNsense</td><td>Ubuntu image của GCP dùng chrony.</td></tr>
+      <tr><td>Card mạng</td><td class="mono">enp1s0</td><td class="mono">ens4</td><td>Tên card của GCP.</td></tr>
+      <tr><td>Firewall</td><td>1 OPNsense 2 vCPU</td><td>2 OPNsense: biên e2-medium (2 card), core e2-highcpu-4 (3 card)</td><td>GCP: số card ≤ số vCPU. Quota Free Trial 12 vCPU → worker, infra-01 hạ xuống e2-medium.</td></tr>
+      <tr><td>Quản trị</td><td>Host nằm ngay trong LAN</td><td>WireGuard qua IP public</td><td>Máy admin ở ngoài mạng.</td></tr>
+      <tr><td>Số VM</td><td>6 (+3 HA tắt)</td><td>6</td><td>Free Trial: 8 VM, 12 vCPU, 8 vCPU E2, 4 IP.</td></tr>
+      <tr><td>Quản trị qua IP public</td><td>—</td><td>IP đổi mỗi lần dựng lại (<code>tofu output fw_public_ip</code>)</td><td>IP tĩnh bị xoá cùng hạ tầng; <code>lab.sh vpn up</code> tự lấy IP mới.</td></tr>
+      <tr><td>WAF</td><td>chưa có</td><td>OWASP CRS ở vùng biên (edge-01)</td><td>Như cặp LB/WAF ở vùng biên của hệ thống thật; Cloud Armor không có trên Free Trial.</td></tr>
+      <tr><td>Jump server</td><td>không có</td><td>jump-01 trong MGMT, VPN chỉ tới đây</td><td>Admin không chạm trực tiếp server; một điểm để ghi phiên và thu hồi quyền.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="onprem">
+  <h2>Chuyển sang on-prem thật</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Trên GCP</th><th>On-prem</th><th>Đổi gì trong code</th></tr></thead>
+    <tbody>
+      <tr><td>4 VPC</td><td>4 VLAN trên switch, trunk vào firewall</td><td>Bỏ tofu; card OPNsense là VLAN</td></tr>
+      <tr><td>Route VPC 0/0 → .253</td><td>Default gateway của VLAN = firewall</td><td>netplan đặt gateway (như lab local)</td></tr>
+      <tr><td>Alias IP .10/.200/.210</td><td>ARP của kube-vip, MetalLB L2 (hoặc BGP)</td><td>Không đổi gì</td></tr>
+      <tr><td>Gateway .1 + route /25</td><td>Không cần, firewall ARP trực tiếp</td><td>Bỏ khỏi bootstrap</td></tr>
+      <tr><td>Serial console GCP</td><td>IPMI SOL, iLO, iDRAC</td><td>Script console giữ nguyên logic</td></tr>
+      <tr><td>Metadata chứa config.xml</td><td>USB chứa <code>/conf/config.xml</code> (importer của OPNsense)</td><td>Cùng file do <code>opnsense-bootstrap.py</code> sinh</td></tr>
+      <tr><td>1 IP public của GCP</td><td>IP public của nhà mạng trên WAN</td><td>Đổi IP WAN, gateway</td></tr>
+      <tr><td>jump-01 (OpenSSH + tty audit)</td><td>Bastion/PAM có ghi hình phiên, MFA (Teleport, CyberArk...)</td><td>Đổi đích ProxyCommand</td></tr>
+      <tr><td>HAProxy + WAF trên 1 VM</td><td>Cặp LB/WAF HA ở vùng biên (thiết bị riêng hoặc 2 VM + keepalived)</td><td>Thêm host vào nhóm <code>dmz</code></td></tr>
+      <tr><td>Garage S3 trên infra-01</td><td>NAS/S3 riêng (hoặc Garage nhiều node), bản sao ngoài site</td><td>Đổi endpoint trong role <code>velero</code></td></tr>
+      <tr><td>2 firewall đơn, cùng hãng; DMZ kiêm transit</td><td>2 cặp HA (CARP), có thể khác hãng; VLAN transit riêng hoặc DAI/port-security trong DMZ</td><td>Thêm host vào nhóm <code>firewalls</code>, tách VLAN transit</td></tr>
+      <tr><td>1 control-plane</td><td>3 control-plane</td><td>Thêm host vào inventory</td></tr>
+      <tr><td>Web và VPN 2 IP public, chung firewall biên và đường truyền</td><td>VPN Gateway riêng, đường truyền riêng; quản trị ngoài băng (IPMI/4G)</td><td>Đổi IP VPN thành IP của thiết bị VPN riêng</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="ops">
+  <h2>Vận hành</h2>
+<pre class="cmd"><span class="c"># dựng lại từ đầu (image đã có thì bỏ bước 1)</span>
+./lab.sh image          <span class="c"># golden image OPNsense nano, dựng trên GCP</span>
+./lab.sh up             <span class="c"># bootstrap config + OpenTofu</span>
+./lab.sh fw-bootstrap   <span class="c"># console → VPN qua WAN → 10-network.yml qua VPN</span>
+./lab.sh cluster        <span class="c"># K8s, addon, Harbor/Squid, app, khoá egress, bảo mật ‖ SIEM, backup</span>
+
+./lab.sh vpn up|down    <span class="c"># VPN quản trị (NetworkManager "gcp-lab")</span>
+./lab.sh ssh 10.20.0.11 <span class="c"># SSH xuyên qua jump-01</span>
+./lab.sh tunnel up      <span class="c"># SOCKS 127.0.0.1:1080 qua jump-01: trình duyệt + kubectl</span>
+./lab.sh browser        <span class="c"># Chromium profile riêng qua tunnel, mở sẵn các trang dưới đây</span>
+./lab.sh console core   <span class="c"># console nối tiếp (edge|core) khi mất VPN</span>
+./lab.sh down           <span class="c"># xoá sạch, ~0,3 USD/giờ khi chạy</span>
+./lab.sh cost           <span class="c"># liệt kê tài nguyên còn sót</span></pre>
+  <div class="tbl"><table>
+    <thead><tr><th>Giao diện</th><th>Địa chỉ (<code>./lab.sh vpn up</code> rồi <code>./lab.sh browser</code>)</th><th>Đăng nhập</th></tr></thead>
+    <tbody>
+      <tr><td>Firewall biên</td><td class="mono">https://10.10.10.253</td><td><code>root</code> / <code>out/opnsense-edge-root.txt</code></td></tr>
+      <tr><td>Firewall core</td><td class="mono">https://10.20.0.253</td><td><code>root</code> / <code>out/opnsense-core-root.txt</code></td></tr>
+      <tr><td>Harbor</td><td class="mono">https://harbor.lab.internal</td><td><code>admin</code> / <code>out/harbor-admin.txt</code></td></tr>
+      <tr><td>Grafana</td><td class="mono">http://mon.lab.internal:3000</td><td><code>admin</code> / <code>out/grafana-admin.txt</code></td></tr>
+      <tr><td>Mailpit</td><td class="mono">http://mon.lab.internal:8025</td><td>không cần</td></tr>
+      <tr><td>Prometheus</td><td class="mono">https://prometheus.int.lab.internal</td><td>không cần (chỉ qua Gateway internal)</td></tr>
+      <tr><td>App demo (nội bộ)</td><td class="mono">https://whoami.int.lab.internal</td><td>không cần</td></tr>
+      <tr><td>kubectl</td><td class="mono">KUBECONFIG=out/kubeconfig</td><td>admin.conf, qua VIP 10.20.0.10 (proxy-url SOCKS)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Bí mật nằm trong <code>~/labs/infra-lab/layered-infra/out/</code> (không commit; <code>lab.sh up</code> tự sinh khi trống). Khoá riêng WireGuard của máy admin chỉ có ở <code>out/wg-admin.key</code>; OPNsense chỉ giữ khoá công khai.</p>
+</section>
+</div>
+
+</body>
+</html>

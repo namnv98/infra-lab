@@ -1,0 +1,22 @@
+- name: Master đầu tiên khởi tạo cluster
+  ansible.builtin.include_tasks: init.yml
+  when: inventory_hostname == first_cp
+
+- name: Các master còn lại join vào control plane
+  ansible.builtin.include_tasks: join.yml
+  when: inventory_hostname != first_cp
+
+- name: Tạo ~/.kube cho user {{ ansible_user }}
+  ansible.builtin.file:
+    path: "/home/{{ ansible_user }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    mode: "0700"
+
+- name: Cho user {{ ansible_user }} dùng kubectl
+  ansible.builtin.copy:
+    src: /etc/kubernetes/admin.conf
+    dest: "/home/{{ ansible_user }}/.kube/config"
+    remote_src: true
+    owner: "{{ ansible_user }}"
+    mode: "0600"

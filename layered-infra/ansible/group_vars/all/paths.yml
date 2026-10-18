@@ -1,0 +1,19 @@
+# Đường dẫn trên máy admin + cách Ansible SSH tới máy — giống nhau mọi môi trường
+
+# Thư mục gốc của lab và out/ (bí mật, kubeconfig, log) — tính từ vị trí inventory, không phụ thuộc playbook
+lab_root: "{{ ansible_config_file | dirname | dirname }}"   # thư mục chứa ansible/ (ansible.cfg) — có cho cả localhost
+lab_env: "{{ plan.platform }}"                     # gcp | onprem (= tên thư mục inventories/<env>)
+lab_out: "{{ lab_root }}/out{{ '' if lab_env == 'gcp' else '/' ~ lab_env }}"   # on-prem tách out/onprem/: không ghi đè bí mật của lab GCP
+
+# SSH: VPN admin chỉ tới được jump-01 → mọi máy khác đi xuyên qua nó.
+# ProxyCommand (không dùng ProxyJump) để chặng tới jump cũng dùng known_hosts riêng của lab.
+ansible_ssh_common_args: >-
+  {{ '' if inventory_hostname in groups['bastion'] else
+     '-o ProxyCommand="ssh -W %h:%p -q -o BatchMode=yes -o UserKnownHostsFile=' ~ lab_out ~ '/known_hosts'
+     ~ ' -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ubuntu@' ~ jump_ip ~ '"' }}
+
+# File cục bộ trên máy admin
+kubeconfig_local: "{{ lab_out }}/kubeconfig"       # kubectl từ máy admin (qua ./lab.sh tunnel up)
+lab_ca_local: "{{ lab_out }}/lab-ca.crt"           # CA của lab (curl, trình duyệt)
+etcd_backup_local: "{{ lab_out }}/backups"         # bản snapshot etcd kéo về
+wg_admin_pubkey_file: "{{ lab_out }}/wg-admin.pub"

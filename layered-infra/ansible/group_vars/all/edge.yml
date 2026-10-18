@@ -1,0 +1,3 @@
+# Vùng biên (edge-01): HAProxy → WAF (ModSecurity + OWASP CRS) → Gateway public
+waf_paranoia: 1            # 1 = ít báo nhầm; tăng 2–4 để chặt hơn
+waf_anomaly_inbound: 5     # ngưỡng điểm bất thường để chặn (mặc định CRS)

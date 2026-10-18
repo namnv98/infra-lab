@@ -1,0 +1,87 @@
+# VPN quản trị WireGuard trên OPNsense: 1 server (wg-admin) + 1 peer (máy admin).
+# Khoá riêng của máy admin chỉ nằm ở out/wg-admin.key trên máy admin; OPNsense chỉ biết khoá công khai.
+- name: WireGuard — peer đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/wireguard/client/search_client", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: wg_clients
+
+- name: WireGuard — tạo peer máy admin
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/wireguard/client/add_client"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      client: { enabled: "1", name: admin, pubkey: "{{ lookup('file', wg_admin_pubkey_file) }}", tunneladdress: "{{ wg_admin_address }}" }
+  when: "'admin' not in (wg_clients.json.rows | map(attribute='name'))"
+  register: wg_client_add
+  changed_when: true
+  failed_when: wg_client_add.json.result | default('') != 'saved'
+
+- name: WireGuard — đọc lại peer
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/wireguard/client/search_client", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: wg_clients
+
+- name: WireGuard — server đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/wireguard/server/search_server", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: wg_servers
+
+- name: WireGuard — sinh cặp khoá cho server
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/wireguard/server/key_pair", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: wg_keys
+  no_log: true
+  when: "'wg-admin' not in (wg_servers.json.rows | map(attribute='name'))"
+
+- name: WireGuard — tạo server wg-admin (MTU 1380 = 1460 của GCP − 80 header WireGuard)
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/wireguard/server/add_server"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      server:
+        enabled: "1"
+        name: wg-admin
+        port: "{{ wg_port }}"
+        mtu: "1380"
+        tunneladdress: "{{ wg_server_address }}"
+        privkey: "{{ wg_keys.json.privkey }}"
+        pubkey: "{{ wg_keys.json.pubkey }}"
+        peers: "{{ (wg_clients.json.rows | selectattr('name', 'equalto', 'admin') | first).uuid }}"
+  when: "'wg-admin' not in (wg_servers.json.rows | map(attribute='name'))"
+  register: wg_server_add
+  changed_when: true
+  failed_when: wg_server_add.json.result | default('') != 'saved'
+  no_log: true
+
+- name: WireGuard — bật dịch vụ
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/wireguard/general/set"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: { general: { enabled: "1" } }
+  register: wg_general
+  changed_when: false
+
+- name: WireGuard — áp dụng
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/wireguard/service/reconfigure", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  when: wg_client_add is changed or wg_server_add is changed
+
+- name: WireGuard — lấy khoá công khai của server (cho cấu hình máy admin)
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/wireguard/server/search_server", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: wg_servers
+
+- name: WireGuard — lưu khoá công khai server vào out/wg-server.pub
+  ansible.builtin.copy:
+    dest: "{{ lab_out }}/wg-server.pub"
+    content: "{{ (wg_servers.json.rows | selectattr('name', 'equalto', 'wg-admin') | first).pubkey }}\n"
+    mode: "0644"

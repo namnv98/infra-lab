@@ -1,0 +1,20 @@
+apiVersion: 1
+datasources:
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: true
+  # Số liệu (metrics) từ Prometheus trong cluster, qua Gateway internal (HTTPS, cert do CA của lab cấp)
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: https://prometheus.int.lab.internal
+    jsonData:
+      tlsAuthWithCACert: true
+      timeInterval: 30s
+    secureJsonData:
+      tlsCACert: |
+        {{ lookup('file', lab_ca_local) | indent(8) }}

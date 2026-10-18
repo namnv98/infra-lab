@@ -1,0 +1,53 @@
+# Dùng rsyslog có sẵn trong Ubuntu: không cài thêm agent nào (tiết kiệm RAM).
+- name: rsyslog gửi log về siem-01
+  ansible.builtin.template:
+    src: 90-forward.conf.j2
+    dest: /etc/rsyslog.d/10-forward.conf     # chạy trước 49-haproxy.conf (file đó có "stop")
+    mode: "0644"
+  notify: Restart rsyslog
+
+- name: Bỏ file chuyển tiếp cũ (tên 90- chạy sau lệnh stop của haproxy)
+  ansible.builtin.file: { path: /etc/rsyslog.d/90-forward.conf, state: absent }
+  notify: Restart rsyslog
+
+- name: rsyslog đọc được file log của ứng dụng (audit K8s, Squid)
+  ansible.builtin.user:
+    name: syslog
+    groups: [adm, proxy]
+    append: true
+  when: log_files | default([]) | length > 0
+  notify: Restart rsyslog
+
+- name: Kiểm tra toàn bộ cấu hình rsyslog trước khi khởi động lại
+  ansible.builtin.command: rsyslogd -N1
+  changed_when: false
+
+- name: Nạp cấu hình ngay
+  ansible.builtin.meta: flush_handlers
+
+# Audit log của apiserver chỉ root đọc được (0600): một service root nhỏ đọc tiếp file và đẩy vào
+# syslog cục bộ với tag k8s-audit; rsyslog gửi tiếp về siem-01. Không nới quyền file, không chạy rsyslog bằng root.
+- name: Service đẩy audit log K8s vào syslog (chỉ trên control-plane)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/k8s-audit-forward.service
+    content: |
+      [Unit]
+      Description=Đẩy audit log của kube-apiserver vào syslog (tag k8s-audit)
+      After=rsyslog.service
+      [Service]
+      ExecStart=/bin/sh -c 'tail -n0 -F /var/log/kubernetes/audit/audit.log | logger -t k8s-audit -p local6.info --size 8192'
+      Restart=always
+      RestartSec=5
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  when: inventory_hostname in groups['k8s_control_plane']
+  register: audit_unit
+
+- name: Bật service đẩy audit log
+  ansible.builtin.systemd_service:
+    name: k8s-audit-forward
+    enabled: true
+    state: "{{ 'restarted' if audit_unit is changed else 'started' }}"
+    daemon_reload: "{{ audit_unit is changed }}"
+  when: inventory_hostname in groups['k8s_control_plane']

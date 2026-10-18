@@ -1,0 +1,30 @@
+- name: Cài Squid
+  ansible.builtin.apt:
+    name: squid
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Danh sách tên miền được phép đi ra
+  ansible.builtin.copy:
+    dest: /etc/squid/allowed-domains.txt
+    content: "{{ squid_allowed_domains | join('\n') }}\n"
+    mode: "0644"
+  notify: Reload squid
+
+- name: Cấu hình Squid (chỉ LAN dùng được, chỉ tên miền trong danh sách)
+  ansible.builtin.template:
+    src: squid.conf.j2
+    dest: /etc/squid/squid.conf
+    mode: "0644"
+    validate: squid -k parse -f %s
+  notify: Reload squid
+
+- name: Bật Squid
+  ansible.builtin.systemd_service:
+    name: squid
+    enabled: true
+    state: started
+
+# Nạp cấu hình ngay, không đợi cuối play (nếu bước sau lỗi, handler sẽ không chạy)
+- name: Áp dụng cấu hình Squid ngay
+  ansible.builtin.meta: flush_handlers

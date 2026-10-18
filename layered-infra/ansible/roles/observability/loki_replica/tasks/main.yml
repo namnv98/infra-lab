@@ -1,0 +1,44 @@
+# Loki thứ hai trên infra-01 làm bản sao log. Kẻ tấn công chiếm được siem-01 xoá log ở siem-01 thì bản sao vẫn còn.
+- name: Thư mục
+  ansible.builtin.file: { path: "{{ item.p }}", state: directory, owner: "{{ item.o | default('root') }}", mode: "0755" }
+  loop: [{ p: /opt/log-archive }, { p: /opt/log-archive/data, o: "10001" }]
+
+- name: Cấu hình (dùng chung mẫu Loki, đổi thời gian giữ)
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/opt/log-archive/{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - { src: docker-compose.yml.j2, dest: docker-compose.yml }
+    - { src: ../../siem/templates/loki.yaml.j2, dest: loki.yaml }
+  vars:
+    log_retention: "{{ log_archive_retention }}"
+  register: cfg
+
+# Chỉ siem-01 được ghi vào bản sao: chặn mọi nguồn khác tới cổng 3100 của container
+- name: Luật firewall DOCKER-USER (chỉ siem-01 tới :3100)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/log-archive-fw.service
+    content: |
+      [Unit]
+      Description=Chỉ cho siem-01 ghi vào Loki bản sao
+      After=docker.service
+      Requires=docker.service
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -p tcp --dport 3100 ! -s {{ mon_ip }} -j DROP 2>/dev/null || iptables -I DOCKER-USER -p tcp --dport 3100 ! -s {{ mon_ip }} -j DROP'
+      ExecStop=/sbin/iptables -D DOCKER-USER -p tcp --dport 3100 ! -s {{ mon_ip }} -j DROP
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  register: fw_unit
+
+- name: Bật luật firewall
+  ansible.builtin.systemd_service: { name: log-archive-fw, enabled: true, state: started, daemon_reload: "{{ fw_unit is changed }}" }
+
+- name: Chạy Loki bản sao
+  ansible.builtin.command: "docker compose up -d {{ '--force-recreate' if cfg is changed else '' }}"
+  args: { chdir: /opt/log-archive }
+  register: up
+  changed_when: "'Started' in up.stderr or 'Recreated' in up.stderr"

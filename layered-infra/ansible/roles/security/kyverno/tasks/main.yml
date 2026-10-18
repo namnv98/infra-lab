@@ -1,0 +1,34 @@
+- name: Cài Kyverno (chart {{ kyverno_chart_version }}) — tối giản cho node 4–8GB
+  kubernetes.core.helm:
+    name: kyverno
+    chart_ref: kyverno
+    chart_repo_url: https://kyverno.github.io/kyverno/
+    chart_version: "{{ kyverno_chart_version }}"
+    release_namespace: "{{ kyverno_namespace }}"
+    create_namespace: true
+    wait: true
+    wait_timeout: 600s
+    values:
+      global:
+        image: { registry: "{{ kyverno_image_registry }}" }
+      admissionController:
+        replicas: 1                     # lab: 1 bản; production ≥ 3 để webhook không thành điểm chết
+        container:
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 384Mi }
+      backgroundController:
+        enabled: false                  # không dùng policy generate / mutate-existing
+      cleanupController:
+        enabled: false                  # không dùng CleanupPolicy
+      reportsController:
+        enabled: true                   # cần để xem kết quả Audit (PolicyReport)
+        resources:
+          requests: { cpu: 20m, memory: 64Mi }
+          limits: { memory: 256Mi }
+
+- name: Policy chỉ cho chạy image từ Harbor
+  kubernetes.core.k8s:
+    template: restrict-image-registries.yaml.j2
+    wait: true
+    wait_condition: { type: Ready, status: "True" }

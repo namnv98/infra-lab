@@ -1,0 +1,56 @@
+# Chuẩn bị hệ điều hành cho kubelet
+
+- name: Tắt swap (kubelet mặc định không chạy khi có swap)
+  ansible.builtin.command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+- name: Comment dòng swap trong fstab để reboot không bật lại
+  ansible.builtin.replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\sswap\s.*)$'
+    replace: '# \1'
+
+- name: Nạp module kernel (overlay cho layer container, br_netfilter để iptables thấy traffic qua bridge)
+  community.general.modprobe:
+    name: "{{ item }}"
+    persistent: present          # ghi vào /etc/modules-load.d để reboot vẫn còn
+  loop: [overlay, br_netfilter]
+
+- name: sysctl cho mạng Pod
+  ansible.posix.sysctl:
+    name: "{{ item }}"
+    value: "1"
+    sysctl_file: /etc/sysctl.d/k8s.conf
+    reload: true
+  loop:
+    - net.ipv4.ip_forward
+    - net.bridge.bridge-nf-call-iptables
+    - net.bridge.bridge-nf-call-ip6tables
+
+- name: Thêm repo apt chính thức của Kubernetes (pkgs.k8s.io)
+  ansible.builtin.deb822_repository:
+    name: kubernetes
+    uris: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor }}/deb/"
+    suites: /
+    signed_by: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_minor }}/deb/Release.key"
+
+- name: Cài kubelet, kubeadm, kubectl đúng phiên bản {{ k8s_version }}
+  ansible.builtin.apt:
+    name:
+      - "kubelet={{ k8s_version }}-*"
+      - "kubeadm={{ k8s_version }}-*"
+      - "kubectl={{ k8s_version }}-*"
+      - cri-tools                       # crictl: xem container/log ở mức runtime khi kubectl không dùng được
+    update_cache: true
+    allow_change_held_packages: true
+
+- name: Giữ phiên bản (apt upgrade sẽ không tự nâng K8s)
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [kubelet, kubeadm, kubectl]
+
+- name: Bật kubelet (sẽ khởi động lại liên tục cho tới khi kubeadm init/join, đó là bình thường)
+  ansible.builtin.systemd_service:
+    name: kubelet
+    enabled: true

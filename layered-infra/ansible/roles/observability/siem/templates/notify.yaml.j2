@@ -1,0 +1,18 @@
+# Cảnh báo → email cho đội SOC. Gom theo tên luật, nhắc lại mỗi 4 giờ nếu vẫn còn.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: soc-email
+    receivers:
+      - uid: soc-email
+        type: email
+        settings:
+          addresses: "{{ alert_email_to }}"
+          singleEmail: true
+policies:
+  - orgId: 1
+    receiver: soc-email
+    group_by: [alertname]
+    group_wait: 10s
+    group_interval: 1m
+    repeat_interval: 4h

@@ -1,0 +1,67 @@
+# Cấu hình phía "khách": tin CA của lab; node K8s kéo image qua Harbor và cài gói qua Squid.
+- name: Tin CA của lab (cert của Harbor do CA này ký)
+  ansible.builtin.copy:
+    src: "{{ lab_ca_local }}"
+    dest: /usr/local/share/ca-certificates/lab-ca.crt
+    mode: "0644"
+  register: ca
+
+- name: Cập nhật kho CA của hệ thống
+  ansible.builtin.command: update-ca-certificates
+  when: ca is changed
+
+- name: apt đi qua Squid
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/90proxy
+    content: |
+      Acquire::http::Proxy "{{ proxy_url }}";
+      Acquire::https::Proxy "{{ proxy_url }}";
+    mode: "0644"
+  when: inventory_hostname in groups['k8s']
+
+- name: Thư mục mirror của containerd cho từng registry
+  ansible.builtin.file:
+    path: "/etc/containerd/certs.d/{{ item.upstream }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ harbor_proxies }}"
+  loop_control: { label: "{{ item.upstream }}" }
+  when: inventory_hostname in groups['k8s']
+
+# containerd đọc hosts.toml mỗi lần kéo image, không cần restart.
+# override_path: gửi /v2/<project>/<image> tới Harbor thay vì /v2/<image>.
+- name: containerd kéo image qua Harbor
+  ansible.builtin.copy:
+    dest: "/etc/containerd/certs.d/{{ item.upstream }}/hosts.toml"
+    content: |
+      server = "https://{{ 'registry-1.docker.io' if item.upstream == 'docker.io' else item.upstream }}"
+
+      [host."https://{{ harbor_host }}/v2/{{ item.project }}"]
+        capabilities = ["pull", "resolve"]
+        override_path = true
+        ca = "/usr/local/share/ca-certificates/lab-ca.crt"
+    mode: "0644"
+  loop: "{{ harbor_proxies }}"
+  loop_control: { label: "{{ item.upstream }} → {{ harbor_host }}/{{ item.project }}" }
+  when: inventory_hostname in groups['k8s']
+
+# Image ghi thẳng tên Harbor (vd. harbor.lab.internal/dockerhub/...): containerd không đọc kho CA hệ thống
+# cho registry này → khai báo CA của lab cho chính harbor.lab.internal (dùng cho policy Kyverno "chỉ Harbor").
+- name: Thư mục cấu hình containerd cho {{ harbor_host }}
+  ansible.builtin.file:
+    path: "/etc/containerd/certs.d/{{ harbor_host }}"
+    state: directory
+    mode: "0755"
+  when: inventory_hostname in groups['k8s']
+
+- name: containerd tin CA của lab khi kéo thẳng từ {{ harbor_host }}
+  ansible.builtin.copy:
+    dest: "/etc/containerd/certs.d/{{ harbor_host }}/hosts.toml"
+    content: |
+      server = "https://{{ harbor_host }}"
+
+      [host."https://{{ harbor_host }}"]
+        capabilities = ["pull", "resolve"]
+        ca = "/usr/local/share/ca-certificates/lab-ca.crt"
+    mode: "0644"
+  when: inventory_hostname in groups['k8s']

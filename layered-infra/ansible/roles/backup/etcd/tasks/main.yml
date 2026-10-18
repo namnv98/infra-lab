@@ -1,0 +1,54 @@
+- name: Cài etcdctl + etcdutl {{ etcd_version }} lên host (cần khi restore, lúc etcd đã dừng)
+  ansible.builtin.unarchive:
+    src: "https://github.com/etcd-io/etcd/releases/download/{{ etcd_version }}/etcd-{{ etcd_version }}-linux-amd64.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    extra_opts: [--strip-components=1, --wildcards, "*/etcdctl", "*/etcdutl"]
+    creates: /usr/local/bin/etcdutl
+
+- name: Script backup
+  ansible.builtin.template:
+    src: etcd-backup.sh.j2
+    dest: /usr/local/sbin/etcd-backup.sh
+    mode: "0750"
+
+- name: systemd service + timer chạy backup hằng ngày lúc 02:00
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item.name }}"
+    content: "{{ item.content }}"
+    mode: "0644"
+  loop:
+    - name: etcd-backup.service
+      content: |
+        [Unit]
+        Description=Snapshot etcd
+        [Service]
+        Type=oneshot
+        ExecStart=/usr/local/sbin/etcd-backup.sh
+    - name: etcd-backup.timer
+      content: |
+        [Unit]
+        Description=Snapshot etcd hằng ngày
+        [Timer]
+        OnCalendar=*-*-* 02:00:00
+        Persistent=true
+        [Install]
+        WantedBy=timers.target
+
+- name: Bật timer
+  ansible.builtin.systemd_service:
+    name: etcd-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Chạy backup ngay một lần
+  ansible.builtin.command: /usr/local/sbin/etcd-backup.sh
+  register: backup_run
+  changed_when: true
+
+- name: Kéo bản backup mới nhất về host ({{ etcd_backup_local }})
+  ansible.builtin.fetch:
+    src: "{{ backup_run.stdout_lines[-1] }}"
+    dest: "{{ etcd_backup_local }}/"
+    flat: true

@@ -1,0 +1,86 @@
+# Kho S3 (Garage) trên infra-01 làm nơi lưu backup Velero — giống MinIO/Ceph RGW ở on-prem.
+# HTTP nội bộ: Garage không tự làm TLS; chỉ LAN gọi được (DOCKER-USER), dữ liệu là manifest K8s (Secret đã mã hoá
+# trong etcd nhưng Velero lưu Secret ở dạng base64) → production nên đặt TLS proxy phía trước + bật mã hoá phía server.
+- name: Thư mục Garage
+  ansible.builtin.file: { path: "{{ garage_dir }}/{{ item }}", state: directory, mode: "0700" }
+  loop: ["", meta, data]
+
+- name: Cấu hình Garage + compose
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ garage_dir }}/{{ item }}"
+    mode: "0600"
+  loop: [garage.toml, docker-compose.yml]
+  register: garage_cfg
+  no_log: true
+
+- name: Chạy Garage
+  ansible.builtin.command: docker compose up -d --force-recreate
+  args: { chdir: "{{ garage_dir }}" }
+  when: garage_cfg is changed
+
+- name: Chỉ LAN được gọi S3 (DOCKER-USER, giữ qua reboot)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/garage-fw.service
+    content: |
+      [Unit]
+      Description=Chỉ LAN được gọi Garage S3 :{{ garage_s3_port }}
+      After=docker.service
+      Requires=docker.service
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -p tcp --dport 3900 ! -s {{ garage_allowed_src }} -j DROP 2>/dev/null || iptables -I DOCKER-USER -p tcp --dport 3900 ! -s {{ garage_allowed_src }} -j DROP'
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  register: garage_fw
+
+- name: Bật luật firewall Garage
+  ansible.builtin.systemd_service: { name: garage-fw, enabled: true, state: started, daemon_reload: "{{ garage_fw is changed }}" }
+
+- name: Chờ Garage chạy
+  ansible.builtin.command: docker exec garage /garage status
+  register: gstatus
+  until: gstatus.rc == 0
+  retries: 20
+  delay: 3
+  changed_when: false
+
+# Lần đầu: gán vai trò lưu trữ cho node duy nhất rồi áp dụng layout
+- name: Node Garage (id)
+  ansible.builtin.command: docker exec garage /garage node id -q
+  register: gnode
+  changed_when: false
+  when: "'NO ROLE ASSIGNED' in gstatus.stdout"
+
+- name: Gán layout (zone dc1, {{ garage_capacity }}) và áp dụng
+  ansible.builtin.shell: |
+    docker exec garage /garage layout assign -z dc1 -c {{ garage_capacity }} {{ gnode.stdout.split('@')[0][:16] }}
+    docker exec garage /garage layout apply --version 1
+  when: "'NO ROLE ASSIGNED' in gstatus.stdout"
+
+- name: Bucket {{ garage_bucket }} có chưa
+  ansible.builtin.command: docker exec garage /garage bucket info {{ garage_bucket }}
+  register: gbucket
+  changed_when: false
+  failed_when: false
+
+- name: Tạo bucket {{ garage_bucket }}
+  ansible.builtin.command: docker exec garage /garage bucket create {{ garage_bucket }}
+  when: gbucket.rc != 0
+
+- name: Key {{ garage_key_name }} có chưa
+  ansible.builtin.command: docker exec garage /garage key info {{ garage_key_name }}
+  register: gkey
+  changed_when: false
+  failed_when: false
+
+- name: Nạp key cho Velero (id/secret sinh sẵn trong out/)
+  ansible.builtin.command: docker exec garage /garage key import --yes -n {{ garage_key_name }} {{ garage_key_id }} {{ garage_secret }}
+  when: gkey.rc != 0
+  no_log: true
+
+- name: Cho key đọc/ghi bucket
+  ansible.builtin.command: docker exec garage /garage bucket allow --read --write --owner {{ garage_bucket }} --key {{ garage_key_name }}
+  when: gkey.rc != 0 or gbucket.rc != 0

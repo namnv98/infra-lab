@@ -1,0 +1,24 @@
+- name: Namespace metallb-system (speaker cần quyền privileged để gửi ARP)
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: metallb-system
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+
+- name: Cài MetalLB {{ metallb_version }}
+  kubernetes.core.helm:
+    name: metallb
+    chart_ref: metallb
+    chart_repo_url: https://metallb.github.io/metallb
+    chart_version: "{{ metallb_version }}"
+    release_namespace: metallb-system
+    wait: true
+    values:
+      frrk8s: { enabled: false }   # FRR chỉ cần cho BGP; lab dùng L2 (ARP) → bớt 6 pod
+
+- name: Dải IP và cách quảng bá (L2/ARP)
+  kubernetes.core.k8s:
+    template: metallb.yaml.j2

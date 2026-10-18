@@ -1,0 +1,8 @@
+# State của OpenTofu chứa thông tin nhạy cảm (IP, tên tài nguyên, đôi khi secret)
+tofu/**/.terraform/
+tofu/**/*.tfstate
+tofu/**/*.tfstate.*
+tofu/**/*.tfplan
+out/
+ansible/.ansible/   # cache của ansible-lint/collection
+__pycache__/

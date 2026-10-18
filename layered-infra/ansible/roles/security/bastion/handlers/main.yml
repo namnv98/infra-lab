@@ -1,0 +1,6 @@
+# restarted thay vì reloaded: Ubuntu 24.04 có thể chạy ssh theo socket-activation (ssh.service chưa active → reload lỗi).
+# Phiên SSH đang mở (kể cả của Ansible) không bị ngắt khi restart.
+- name: Reload ssh
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: restarted

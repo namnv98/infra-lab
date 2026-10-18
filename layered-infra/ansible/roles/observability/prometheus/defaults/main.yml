@@ -1,0 +1,5 @@
+# Giám sát số liệu (metrics): kube-prometheus-stack, chỉ phần thu thập + lưu.
+# Grafana và cảnh báo dùng chung với SIEM trên siem-01 (thêm datasource Prometheus) → không chạy Grafana/Alertmanager trong cluster.
+prometheus_stack_version: "92.10.1"   # kube-prometheus-stack, operator v0.94.1
+prometheus_retention: 3d          # lab: giữ 3 ngày, lưu emptyDir (cluster chưa có storage)
+prometheus_host: "prometheus.{{ gateways.internal.domain }}"   # chỉ mở qua Gateway internal (LAN, VPN, siem-01)

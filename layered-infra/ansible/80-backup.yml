@@ -1,0 +1,6 @@
+# Velero backup toàn cluster hằng ngày vào kho S3 Garage trên infra-01 (cần S3 từ 40-shared-services.yml).
+- name: Velero trong cluster
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  environment: "{{ egress_env | combine({'K8S_AUTH_KUBECONFIG': '/etc/kubernetes/admin.conf', 'KUBECONFIG': '/etc/kubernetes/admin.conf'}) }}"
+  roles: [backup/velero]

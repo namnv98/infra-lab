@@ -1,0 +1,14 @@
+- name: Join làm control plane (kéo cert từ cluster bằng certificate key)
+  ansible.builtin.command: >
+    {{ hostvars[first_cp].join_command }}
+    --control-plane
+    --certificate-key {{ hostvars[first_cp].certificate_key }}
+    --apiserver-advertise-address {{ ansible_host }}
+    --node-name {{ inventory_hostname }}
+  args:
+    creates: /etc/kubernetes/kubelet.conf
+
+# Đặt sau khi join, vì preflight của kubeadm join yêu cầu thư mục manifests phải trống
+- name: Chạy kube-vip trên master này để tham gia bầu leader giữ VIP
+  ansible.builtin.include_role:
+    name: k8s/kube_vip

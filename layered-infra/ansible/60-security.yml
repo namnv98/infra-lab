@@ -1,0 +1,12 @@
+# Bảo mật trong cluster: backup etcd, hardening apiserver (khởi động lại apiserver!), PSA, Kyverno, NetworkPolicy, kube-bench.
+- name: Bảo mật trong cluster + backup etcd
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  environment: "{{ egress_env | combine({'K8S_AUTH_KUBECONFIG': '/etc/kubernetes/admin.conf', 'KUBECONFIG': '/etc/kubernetes/admin.conf'}) }}"
+  roles:
+    - backup/etcd     # cài etcdctl trước (apiserver_hardening dùng để kiểm tra Secret đã mã hoá) + backup hằng ngày
+    - security/apiserver   # audit log, mã hoá Secret, tắt profiling
+    - security/pod_security    # Pod Security Admission: restricted cho namespace app
+    - security/kyverno         # policy engine: namespace app chỉ chạy image từ Harbor
+    - security/netpol          # default-deny + chỉ mở đúng luồng cần
+    - security/kube_bench      # chấm điểm CIS Benchmark

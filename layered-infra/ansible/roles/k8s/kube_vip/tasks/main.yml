@@ -1,0 +1,7 @@
+# Từ K8s 1.29, admin.conf chỉ có quyền sau khi kubeadm init xong (nó được cấp quyền qua RBAC).
+# Trong lúc init, kube-vip trên master đầu tiên phải dùng super-admin.conf, init xong thì đổi lại admin.conf.
+- name: Đặt manifest kube-vip (kubeconfig = {{ kube_vip_kubeconfig | default('admin.conf') }})
+  ansible.builtin.template:
+    src: kube-vip.yaml.j2
+    dest: /etc/kubernetes/manifests/kube-vip.yaml
+    mode: "0600"

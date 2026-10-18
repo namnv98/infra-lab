@@ -1,0 +1,53 @@
+# Chuỗi cung ứng image: mọi image phải đi qua Harbor (cache, quét Trivy, kiểm soát nguồn).
+#  - Namespace app (nhãn {{ kyverno_strict_label.key }}={{ kyverno_strict_label.value }}): ÉP image phải ghi rõ harbor.lab.internal/...
+#  - Namespace hệ thống: chỉ GHI NHẬN (Audit) nếu image từ registry Harbor không proxy —
+#    các registry trong danh sách vẫn được containerd chuyển hướng qua Harbor (mirror), nên vẫn an toàn.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Chỉ dùng image từ Harbor
+    policies.kyverno.io/severity: high
+spec:
+  background: true
+  rules:
+  - name: app-chi-dung-harbor
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+          namespaceSelector:
+            matchLabels: { {{ kyverno_strict_label.key }}: "{{ kyverno_strict_label.value }}" }
+    validate:
+      failureAction: Enforce
+      message: >-
+        Namespace này chỉ cho chạy image từ Harbor nội bộ: image phải bắt đầu bằng "{{ harbor_host }}/"
+        (vd. {{ harbor_host }}/dockerhub/nginx:1.27).
+      pattern:
+        spec:
+          =(ephemeralContainers):
+          - image: "{{ harbor_host }}/*"
+          =(initContainers):
+          - image: "{{ harbor_host }}/*"
+          containers:
+          - image: "{{ harbor_host }}/*"
+  - name: he-thong-chi-registry-qua-harbor
+    match:
+      any:
+      - resources:
+          kinds: [Pod]
+    exclude:
+      any:
+      - resources:
+          namespaceSelector:
+            matchLabels: { {{ kyverno_strict_label.key }}: "{{ kyverno_strict_label.value }}" }
+    validate:
+      failureAction: Audit
+      message: "Image không thuộc registry mà Harbor proxy ({{ kyverno_proxied_registries | join(', ') }})."
+      pattern:
+        spec:
+          =(initContainers):
+          - image: "{{ (kyverno_proxied_registries + [harbor_host]) | map('regex_replace', '$', '/*') | join(' | ') }}"
+          containers:
+          - image: "{{ (kyverno_proxied_registries + [harbor_host]) | map('regex_replace', '$', '/*') | join(' | ') }}"

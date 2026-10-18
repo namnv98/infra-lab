@@ -1,0 +1,10 @@
+# Kyverno: policy engine (admission webhook) — chỉ cho chạy image từ Harbor
+kyverno_chart_version: "3.9.1"     # Kyverno v1.19.1 (chart phát hành 10/09/2026)
+kyverno_namespace: kyverno
+# Image của Kyverno: mặc định chart kéo từ reg.kyverno.io (Harbor KHÔNG proxy registry này)
+# → đổi sang ghcr.io, containerd tự kéo qua project "ghcr" của Harbor.
+kyverno_image_registry: ghcr.io
+# Namespace app gắn nhãn này thì bị ÉP (Enforce) chỉ dùng image harbor.lab.internal/...
+kyverno_strict_label: { key: lab/policy, value: strict }
+# Registry Harbor đang proxy (namespace hệ thống: chỉ Audit, vì containerd đã kéo chúng qua Harbor)
+kyverno_proxied_registries: [docker.io, registry.k8s.io, ghcr.io, quay.io]

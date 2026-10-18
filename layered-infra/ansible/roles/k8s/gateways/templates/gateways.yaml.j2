@@ -1,0 +1,58 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gateway
+  labels:
+{% for name in gateways %}
+    gateway.lab/{{ name }}: "true"      # cho phép route redirect trong ns này gắn vào
+{% endfor %}
+{% for name, gw in gateways.items() %}
+---
+# Gateway "{{ name }}": IP {{ gw.ip }}, nhận *.{{ gw.domain }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ name }}
+  namespace: gateway
+  annotations:
+    cert-manager.io/cluster-issuer: lab-ca   # cert-manager tự tạo cert cho listener https
+spec:
+  gatewayClassName: cilium
+  infrastructure:
+    annotations:                              # gắn lên Service LoadBalancer mà Cilium tạo
+      metallb.io/address-pool: {{ name }}
+      metallb.io/loadBalancerIPs: {{ gw.ip }}
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+    hostname: "*.{{ gw.domain }}"
+    allowedRoutes:
+      namespaces:
+        from: Selector                        # chỉ namespace có nhãn này mới gắn route được
+        selector: { matchLabels: { gateway.lab/{{ name }}: "true" } }
+  - name: https
+    protocol: HTTPS
+    port: 443
+    hostname: "*.{{ gw.domain }}"
+    tls:
+      mode: Terminate
+      certificateRefs: [{ name: {{ name }}-wildcard-tls }]
+    allowedRoutes:
+      namespaces:
+        from: Selector
+        selector: { matchLabels: { gateway.lab/{{ name }}: "true" } }
+---
+# Mọi request http → chuyển hướng sang https
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ name }}-https-redirect
+  namespace: gateway
+spec:
+  parentRefs: [{ name: {{ name }}, sectionName: http }]
+  rules:
+  - filters:
+    - type: RequestRedirect
+      requestRedirect: { scheme: https, statusCode: 301 }
+{% endfor %}

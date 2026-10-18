@@ -1,0 +1,59 @@
+- name: Namespace monitoring (node-exporter cần hostNetwork/hostPID → privileged; mở được qua Gateway internal)
+  kubernetes.core.k8s:
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: monitoring
+        labels:
+          pod-security.kubernetes.io/enforce: privileged
+          gateway.lab/internal: "true"
+
+- name: Cài kube-prometheus-stack {{ prometheus_stack_version }} (Prometheus + node-exporter + kube-state-metrics)
+  kubernetes.core.helm:
+    name: kps
+    chart_ref: kube-prometheus-stack
+    chart_repo_url: https://prometheus-community.github.io/helm-charts
+    chart_version: "{{ prometheus_stack_version }}"
+    release_namespace: monitoring
+    wait: true
+    wait_timeout: 10m
+    values:
+      fullnameOverride: kps
+      grafana: { enabled: false }          # dùng Grafana trên siem-01
+      alertmanager: { enabled: false }     # cảnh báo do Grafana trên siem-01 gửi (email Mailpit)
+      kubeProxy: { enabled: false }        # Cilium thay kube-proxy
+      kubeEtcd: { enabled: false }         # etcd/scheduler/controller-manager chỉ nghe 127.0.0.1 (kubeadm mặc định)
+      kubeScheduler: { enabled: false }
+      kubeControllerManager: { enabled: false }
+      defaultRules:
+        create: false                      # luật cảnh báo đặt ở Grafana (một chỗ cho cả log và metrics)
+      prometheusOperator:
+        admissionWebhooks: { patch: { enabled: true } }
+        resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 256Mi } }
+      prometheus:
+        prometheusSpec:
+          retention: "{{ prometheus_retention }}"
+          resources: { requests: { cpu: 100m, memory: 512Mi }, limits: { memory: 1536Mi } }
+          # thu cả ServiceMonitor/PodMonitor của các chart khác (Cilium, cert-manager...), không cần nhãn release
+          serviceMonitorSelectorNilUsesHelmValues: false
+          podMonitorSelectorNilUsesHelmValues: false
+      kube-state-metrics:
+        resources: { requests: { cpu: 10m, memory: 64Mi }, limits: { memory: 256Mi } }
+      prometheus-node-exporter:
+        resources: { requests: { cpu: 10m, memory: 32Mi }, limits: { memory: 128Mi } }
+
+- name: Mở Prometheus qua Gateway internal (https://{{ prometheus_host }})
+  kubernetes.core.k8s:
+    template: route.yaml.j2
+
+- name: Chờ Prometheus có dữ liệu node
+  # image Prometheus không có shell/wget → hỏi qua service proxy của API server
+  ansible.builtin.command: >
+    kubectl get --raw
+    '/api/v1/namespaces/monitoring/services/kps-prometheus:9090/proxy/api/v1/query?query=count(up%7Bjob%3D%22node-exporter%22%7D%3D%3D1)'
+  register: prom_up
+  until: prom_up.rc == 0 and '"value"' in prom_up.stdout
+  retries: 20
+  delay: 15
+  changed_when: false

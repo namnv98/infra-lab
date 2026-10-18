@@ -1,0 +1,125 @@
+// Alloy: nhận syslog RFC5424 qua TCP từ mọi máy → chuẩn hoá → ghi vào Loki trên siem-01
+// và Loki bản sao trên infra-01 (ngoài siem-01, giữ lâu hơn).
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+loki.write "archive" {
+  endpoint {
+    url = "http://{{ svc_ip }}:3100/loki/api/v1/push"
+  }
+}
+
+// ---------- Chuẩn hoá: tách trường ngay lúc nhận ----------
+// Nhãn (label): ít giá trị, dùng để chọn luồng. Structured metadata: nhiều giá trị (IP, user...), dùng để lọc.
+loki.process "normalize" {
+  forward_to = [loki.write.local.receiver, loki.write.archive.receiver]
+
+  // Firewall OPNsense (filterlog, CSV): rule,sub,anchor,label,iface,reason,action,dir,4,...,proto,len,src,dst,sport,dport
+  stage.match {
+    selector = `{app="filterlog"}`
+    stage.regex {
+      expression = `^[^,]*,[^,]*,[^,]*,(?P<rule>[^,]*),(?P<iface>[^,]*),[^,]*,(?P<action>[^,]*),(?P<dir>[^,]*),4,(?:[^,]*,){7}(?P<proto>[^,]*),[^,]*,(?P<src>[^,]*),(?P<dst>[^,]*)(?:,(?P<sport>[0-9]+),(?P<dport>[0-9]+))?`
+    }
+    stage.labels {
+      values = { action = "", iface = "" }
+    }
+    stage.structured_metadata {
+      values = { src = "", dst = "", dport = "", proto = "", rule = "" }
+    }
+  }
+
+  // Audit log K8s (JSON): ai, làm gì, với tài nguyên nào, kết quả
+  stage.match {
+    selector = `{app="k8s-audit"}`
+    stage.json {
+      expressions = { verb = "verb", user = "user.username", resource = "objectRef.resource", subresource = "objectRef.subresource", namespace = "objectRef.namespace", code = "responseStatus.code" }
+    }
+    stage.labels {
+      values = { verb = "" }
+    }
+    stage.structured_metadata {
+      values = { user = "", resource = "", subresource = "", namespace = "", code = "" }
+    }
+  }
+
+  // auditd (qua audisp-syslog): khoá luật -k
+  stage.match {
+    selector = `{app=~"audispd|audisp-syslog"}`
+    stage.regex {
+      expression = `key="?(?P<audit_key>[a-z_]+)`
+    }
+    stage.labels {
+      values = { audit_key = "" }
+    }
+  }
+
+  // Squid: client, kết quả (TCP_DENIED/TCP_TUNNEL...), URL
+  stage.match {
+    selector = `{app="squid"}`
+    stage.regex {
+      expression = `^\s*\S+\s+\S+\s+(?P<client>\S+)\s+(?P<squid_result>[A-Z_]+)/(?P<status>[0-9]+)\s+\S+\s+(?P<method>\S+)\s+(?P<url>\S+)`
+    }
+    stage.labels {
+      values = { squid_result = "" }
+    }
+    stage.structured_metadata {
+      values = { client = "", url = "", method = "" }
+    }
+  }
+}
+
+// ---------- Nhận syslog ----------
+loki.relabel "syslog" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__syslog_message_hostname"]
+    target_label  = "host"
+  }
+  rule {
+    source_labels = ["__syslog_message_app_name"]
+    target_label  = "app"
+  }
+  rule {
+    source_labels = ["__syslog_message_severity"]
+    target_label  = "level"
+  }
+}
+
+loki.source.syslog "net" {
+  listener {
+    address                = "0.0.0.0:{{ mon_syslog_port }}"
+    protocol               = "tcp"
+    use_incoming_timestamp = true
+    labels                 = { job = "syslog" }
+  }
+  relabel_rules = loki.relabel.syslog.rules
+  forward_to    = [loki.process.normalize.receiver]
+}
+
+// ---------- Cảnh báo của Wazuh manager (alerts.json) ----------
+local.file_match "wazuh" {
+  path_targets = [{ __path__ = "/wazuh-logs/alerts/alerts.json", app = "wazuh", job = "wazuh" }]
+}
+
+loki.source.file "wazuh" {
+  targets    = local.file_match.wazuh.targets
+  forward_to = [loki.process.wazuh.receiver]
+}
+
+loki.process "wazuh" {
+  forward_to = [loki.write.local.receiver, loki.write.archive.receiver]
+
+  stage.json {
+    expressions = { wazuh_level = "rule.level", host = "agent.name", rule_id = "rule.id", rule_desc = "rule.description", groups = "rule.groups" }
+  }
+  stage.labels {
+    values = { wazuh_level = "", host = "" }
+  }
+  stage.structured_metadata {
+    values = { rule_id = "", rule_desc = "" }
+  }
+}

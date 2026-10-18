@@ -1,0 +1,5 @@
+- name: Nạp luật audit
+  ansible.builtin.command: augenrules --load
+
+- name: Khởi động lại auditd
+  ansible.builtin.command: service auditd restart     # auditd từ chối "systemctl restart"

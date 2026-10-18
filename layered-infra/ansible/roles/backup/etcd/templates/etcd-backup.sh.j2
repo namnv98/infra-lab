@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Snapshot etcd ra {{ etcd_backup_dir }}, giữ {{ etcd_backup_keep }} bản. In đường dẫn file ở dòng cuối.
+set -euo pipefail
+mkdir -p {{ etcd_backup_dir }} && chmod 700 {{ etcd_backup_dir }}
+f={{ etcd_backup_dir }}/etcd-$(hostname)-$(date +%Y%m%d-%H%M%S).db
+ETCDCTL_API=3 etcdctl --endpoints https://127.0.0.1:2379 \
+  --cacert /etc/kubernetes/pki/etcd/ca.crt \
+  --cert /etc/kubernetes/pki/etcd/server.crt \
+  --key /etc/kubernetes/pki/etcd/server.key \
+  snapshot save "$f" >/dev/null
+etcdutl snapshot status "$f" -w table >&2          # kiểm tra file hợp lệ (hash, revision, số key)
+ls -1t {{ etcd_backup_dir }}/etcd-*.db | tail -n +{{ etcd_backup_keep + 1 }} | xargs -r rm -f
+echo "$f"

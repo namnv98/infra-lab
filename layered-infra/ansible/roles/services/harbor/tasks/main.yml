@@ -1,0 +1,242 @@
+# Harbor trên infra-01: registry nội bộ, chạy bằng docker compose.
+# Mỗi project proxy-cache = 1 registry ngoài; lần đầu kéo thì Harbor tải về và giữ lại, lần sau lấy từ cache.
+- name: Cài Docker + compose
+  ansible.builtin.apt:
+    name: [docker.io, docker-compose-v2]
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Thư mục cert của Harbor
+  ansible.builtin.file:
+    path: /etc/harbor/tls
+    state: directory
+    mode: "0700"
+
+- name: Cert TLS (do cert-manager trong cluster cấp, ký bởi lab-ca)
+  ansible.builtin.copy:
+    dest: "/etc/harbor/tls/{{ item.name }}"
+    content: "{{ item.data }}"
+    mode: "0600"
+  loop:
+    - { name: tls.crt, data: "{{ hostvars[first_cp].harbor_tls.crt }}" }
+    - { name: tls.key, data: "{{ hostvars[first_cp].harbor_tls.key }}" }
+  loop_control: { label: "{{ item.name }}" }
+  no_log: true
+  register: harbor_cert
+
+- name: Tải bộ cài Harbor {{ harbor_version }}
+  ansible.builtin.unarchive:
+    src: "https://github.com/goharbor/harbor/releases/download/{{ harbor_version }}/harbor-online-installer-{{ harbor_version }}.tgz"
+    dest: /opt
+    remote_src: true
+    creates: /opt/harbor/install.sh
+
+- name: Tạo harbor.yml từ mẫu đi kèm
+  ansible.builtin.copy:
+    src: /opt/harbor/harbor.yml.tmpl
+    dest: /opt/harbor/harbor.yml
+    remote_src: true
+    force: false
+    mode: "0600"
+
+- name: Điền cấu hình (hostname, cert, mật khẩu)
+  ansible.builtin.replace:
+    path: /opt/harbor/harbor.yml
+    regexp: "{{ item.re }}"
+    replace: "{{ item.to }}"
+  loop:
+    - { re: '^hostname: .*', to: "hostname: {{ harbor_host }}" }
+    - { re: '^(\s+certificate:) .*', to: '\1 /etc/harbor/tls/tls.crt' }
+    - { re: '^(\s+private_key:) .*', to: '\1 /etc/harbor/tls/tls.key' }
+    - { re: '^harbor_admin_password: .*', to: "harbor_admin_password: {{ harbor_admin_password }}" }
+    - { re: '^(\s+password:) root123$', to: "\\1 {{ harbor_db_password }}" }
+  loop_control: { label: "{{ item.re }}" }
+  no_log: true
+
+- name: Harbor đã bật Trivy chưa (có service trivy-adapter trong compose)
+  ansible.builtin.command: grep -q trivy-adapter /opt/harbor/docker-compose.yml
+  register: has_trivy
+  changed_when: false
+  failed_when: false
+
+# --with-trivy: thêm trivy-adapter (quét lỗ hổng image). Trivy tự tải CSDL lỗ hổng từ Internet (infra-01 ra thẳng được).
+- name: Sinh cấu hình Harbor kèm Trivy (prepare tạo docker-compose.yml và config/)
+  ansible.builtin.command: ./prepare --with-trivy
+  args:
+    chdir: /opt/harbor
+  when: has_trivy.rc != 0
+  register: harbor_prepared
+
+# Tách riêng bước kéo image để thử lại khi mạng chập chờn (layer đã tải được giữ lại)
+- name: Kéo image goharbor/* từ Docker Hub (thử lại tối đa 10 lần)
+  ansible.builtin.command: docker compose pull --quiet
+  args:
+    chdir: /opt/harbor
+  register: pull
+  until: pull.rc == 0
+  retries: 10
+  delay: 15
+  changed_when: false
+
+# Sau khi prepare sinh lại cấu hình: tạo lại TOÀN BỘ stack. Nếu chỉ core được tạo lại, nginx vẫn giữ IP cũ của core
+# (nginx phân giải tên lúc khởi động) → mọi /api/* trả 404 và "Chờ Harbor khoẻ" treo.
+- name: Chạy Harbor
+  ansible.builtin.command: "docker compose up -d{{ ' --force-recreate' if harbor_prepared is changed else '' }}"
+  args:
+    chdir: /opt/harbor
+  register: up
+  changed_when: "'Started' in up.stderr or 'Created' in up.stderr"
+
+- name: Chờ Harbor khoẻ
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/health"
+    return_content: true
+  register: health
+  until: health.status == 200 and health.json.status == 'healthy'
+  retries: 40
+  delay: 5
+
+# ---------- Project proxy-cache ----------
+- name: Registry ngoài đã khai báo
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/registries?page_size=100"
+    url_username: admin
+    url_password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+  register: regs
+
+- name: Khai báo registry ngoài (endpoint)
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/registries"
+    method: POST
+    url_username: admin
+    url_password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body: { name: "{{ item.project }}", type: "{{ item.type }}", url: "{{ item.url }}", insecure: false }
+    status_code: [201]
+  loop: "{{ harbor_proxies }}"
+  # Harbor ping registry khi tạo; vừa khởi động hoặc mạng chậm hay báo "unhealthy" → thử lại
+  register: reg_add
+  until: reg_add.status == 201
+  retries: 6
+  delay: 10
+  loop_control: { label: "{{ item.project }} → {{ item.url }}" }
+  when: item.project not in (regs.json | map(attribute='name'))
+
+- name: Đọc lại id registry
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/registries?page_size=100"
+    url_username: admin
+    url_password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+  register: regs_now
+
+- name: Project đang có
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/projects?page_size=100"
+    url_username: admin
+    url_password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+  register: projs
+
+- name: "Tạo project proxy-cache (public: node kéo không cần đăng nhập)"
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/projects"
+    method: POST
+    url_username: admin
+    url_password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      project_name: "{{ item.project }}"
+      registry_id: "{{ (regs_now.json | selectattr('name', 'equalto', item.project) | first).id }}"
+      metadata: { public: "true" }
+    status_code: [201]
+  loop: "{{ harbor_proxies }}"
+  loop_control: { label: "{{ item.project }}" }
+  when: item.project not in (projs.json | map(attribute='name'))
+
+# Khi máy khởi động lại, Docker bật mọi container cùng lúc; các container của Harbor ghi log qua syslog
+# tới harbor-log (localhost:1514), nên nếu harbor-log chưa sẵn sàng thì chúng thoát (mã 128).
+# Unit này chạy "compose up" sau khi Docker sẵn sàng để Harbor luôn tự lên lại.
+- name: systemd unit khởi động Harbor sau Docker
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/harbor.service
+    content: |
+      [Unit]
+      Description=Harbor (docker compose)
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/harbor
+      ExecStartPre=/bin/sleep 5
+      ExecStart=/usr/bin/docker compose up -d
+      ExecStop=/usr/bin/docker compose stop
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  register: harbor_unit
+
+- name: Bật unit Harbor
+  ansible.builtin.systemd_service:
+    name: harbor
+    enabled: true
+    state: started
+    daemon_reload: "{{ harbor_unit is changed }}"
+
+# ---------- Quét lỗ hổng (Trivy) ----------
+# Project proxy-cache (image hệ thống: Cilium, etcd, CoreDNS...): chỉ QUÉT + báo cáo, KHÔNG chặn.
+# Chặn image có lỗ hổng Critical ở đây sẽ làm hỏng chính cluster (không tự vá được image upstream).
+- name: Bật quét tự động cho project proxy-cache (chỉ báo cáo)
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/projects/{{ item.project }}"
+    method: PUT
+    url_username: admin
+    url_password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body: { metadata: { auto_scan: "true" } }
+  loop: "{{ harbor_proxies }}"
+  loop_control: { label: "{{ item.project }}" }
+  when: (projs.json | selectattr('name', 'equalto', item.project) | map(attribute='metadata') | first | default({})).auto_scan | default('false') != 'true'
+  changed_when: true
+
+# Project "apps": image do đội dev tự build/đẩy lên. Quét khi push + CHẶN kéo nếu có lỗ hổng từ mức Critical.
+- name: Project apps (quét khi push, chặn image có lỗ hổng Critical)
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/projects"
+    method: POST
+    url_username: admin
+    url_password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      project_name: "{{ harbor_apps_project }}"
+      metadata: { public: "true", auto_scan: "true", prevent_vul: "true", severity: critical }
+    status_code: [201]
+  when: harbor_apps_project not in (projs.json | map(attribute='name'))
+
+- name: Lịch quét lại toàn bộ image hằng ngày (CSDL lỗ hổng cập nhật liên tục)
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/system/scanAll/schedule"
+    url_username: admin
+    url_password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+  register: scan_sched
+
+- name: Đặt lịch quét toàn bộ lúc 03:00
+  ansible.builtin.uri:
+    url: "https://{{ harbor_host }}/api/v2.0/system/scanAll/schedule"
+    method: "{{ 'PUT' if (scan_sched.json | default({})).schedule is defined else 'POST' }}"
+    url_username: admin
+    url_password: "{{ harbor_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body: { schedule: { type: Custom, cron: "0 0 3 * * *" } }
+    status_code: [200, 201]
+  when: ((scan_sched.json | default({})).schedule | default({})).cron | default('') != '0 0 3 * * *'
+  changed_when: true

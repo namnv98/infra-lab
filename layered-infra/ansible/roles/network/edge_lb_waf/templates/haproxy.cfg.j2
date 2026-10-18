@@ -1,0 +1,49 @@
+# Do Ansible quản lý (role network/edge_lb_waf). HAProxy ở vùng biên (DMZ):
+#   - giải mã TLS bằng cert edge, thêm X-Forwarded-For (IP thật của client, port forward của OPNsense giữ nguyên IP)
+#   - chuyển qua WAF (127.0.0.1:{{ waf_port }}) rồi mới mã hoá lại tới Gateway public {{ gateways.public.ip }}
+# Firewall OPNsense chỉ cho DMZ đi tới {{ gateways.public.ip }}:80/443, nên dù edge-01 bị chiếm cũng không đi xa hơn được.
+global
+    log /dev/log local0
+    maxconn 4096
+    user haproxy
+    group haproxy
+    daemon
+    ssl-default-bind-options ssl-min-ver TLSv1.2 no-tls-tickets
+    ssl-default-server-options ssl-min-ver TLSv1.2
+
+defaults
+    mode    http
+    log     global
+    option  httplog
+    timeout connect 5s
+    timeout client  60s
+    timeout server  60s
+    timeout http-request 10s
+
+# Internet → HTTPS (HTTP chỉ để chuyển hướng)
+frontend edge_http
+    bind :80
+    http-request redirect scheme https code 301
+
+frontend edge_https
+    bind :443 ssl crt /etc/haproxy/certs/edge.pem alpn http/1.1
+    option forwardfor
+    http-request set-header X-Forwarded-Proto https
+    http-response set-header Strict-Transport-Security "max-age=31536000"
+    default_backend waf
+
+backend waf
+    option httpchk
+    http-check send meth GET uri /healthz hdr Host waf.local   # Host là tên, tránh luật CRS 920350 (Host = IP)
+    server waf1 127.0.0.1:{{ waf_port }} check
+
+# WAF → Gateway public: chỉ nghe localhost (không ai đi vòng qua WAF được)
+frontend from_waf
+    bind 127.0.0.1:{{ waf_upstream_port }}
+    # nginx của WAF nối thêm IP client vào X-Forwarded-For (đã có từ edge_https) → lặp; đặt lại từ X-Real-IP mà WAF gửi
+    http-request set-header X-Forwarded-For %[req.hdr(X-Real-IP)]
+    default_backend gw_public
+
+backend gw_public
+    # SNI = Host của request (Envoy chọn listener theo SNI), kiểm cert Gateway bằng CA của lab
+    server gw {{ gateways.public.ip }}:443 ssl verify required ca-file /etc/haproxy/certs/lab-ca.crt sni req.hdr(host),field(1,:) check check-sni health.{{ gateways.public.domain }} verifyhost health.{{ gateways.public.domain }}

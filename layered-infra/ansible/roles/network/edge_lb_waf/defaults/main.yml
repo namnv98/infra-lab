@@ -1,0 +1,2 @@
+waf_port: 8080            # WAF nghe trên edge-01 (HAProxy gọi tới)
+waf_upstream_port: 8081   # HAProxy nghe 127.0.0.1, nhận request đã qua WAF rồi mã hoá lại tới Gateway public

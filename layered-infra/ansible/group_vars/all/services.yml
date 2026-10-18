@@ -1,0 +1,41 @@
+# Dịch vụ dùng chung trên infra-01: Harbor (cache image) + Squid (proxy đi ra có allowlist)
+
+# true = node còn được ra thẳng Internet 80/443 (lúc dựng, Squid chưa có — lab.sh truyền -e egress_temp_open=true);
+# false = chỉ infra-01 được ra Internet, mọi node đi qua Harbor/Squid.
+egress_temp_open: false
+
+harbor_host: "harbor.{{ lab_domain }}"
+# Mỗi registry ngoài = 1 project proxy-cache trong Harbor; containerd trên node trỏ vào đây
+harbor_proxies:
+  - { project: dockerhub, upstream: docker.io,       type: docker-hub,      url: "https://hub.docker.com" }
+  - { project: k8s,       upstream: registry.k8s.io, type: docker-registry, url: "https://registry.k8s.io" }
+  - { project: ghcr,      upstream: ghcr.io,         type: github-ghcr,     url: "https://ghcr.io" }
+  - { project: quay,      upstream: quay.io,         type: docker-registry, url: "https://quay.io" }   # loại "quay" không hỗ trợ proxy-cache
+
+# Tên miền node được phép ra qua Squid (apt, tải công cụ, Helm chart). Image container KHÔNG nằm đây: đi qua Harbor.
+squid_allowed_domains:
+  - .ubuntu.com            # archive, security
+  - pkgs.k8s.io
+  - prod-cdn.packages.k8s.io
+  - dl.k8s.io
+  - cdn.dl.k8s.io
+  - github.com
+  - .githubusercontent.com
+  - get.helm.sh
+  - packages.wazuh.com     # wazuh-agent (apt)
+  - metallb.github.io
+  - charts.jetstack.io
+  - kyverno.github.io                # Helm chart Kyverno
+  - prometheus-community.github.io   # Helm chart kube-prometheus-stack
+  - vmware-tanzu.github.io           # Helm chart Velero
+
+# Đặt vào environment của play cần tải từ Internet (helm, get_url, unarchive)
+proxy_env:
+  http_proxy: "{{ proxy_url }}"
+  https_proxy: "{{ proxy_url }}"
+  HTTP_PROXY: "{{ proxy_url }}"
+  HTTPS_PROXY: "{{ proxy_url }}"
+  no_proxy: "{{ proxy_no }}"
+  NO_PROXY: "{{ proxy_no }}"
+# Đã siết egress thì đi qua Squid; đang dựng từ đầu (egress_temp_open) thì đi thẳng
+egress_env: "{{ {} if egress_temp_open | bool else proxy_env }}"

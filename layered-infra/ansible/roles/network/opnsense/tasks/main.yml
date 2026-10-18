@@ -1,0 +1,186 @@
+# Cấu hình OPNsense qua REST API (chạy trên máy chủ). Khai báo: alias, luật, port forward, DNS nội bộ
+# nằm trong group_vars; mỗi đối tượng được nhận diện bằng tên/mô tả, chạy lại không tạo trùng.
+- name: Luật cần áp dụng (bootstrap qua WAN = chỉ luật VPN; còn lại làm sau, qua VPN)
+  ansible.builtin.set_fact:
+    opn_rules_eff: "{{ opn_rules | selectattr('description', 'in', opn_bootstrap_rules) | list if opn_bootstrap | default(false) else opn_rules }}"
+    opn_disabled_eff: "{{ [] if opn_bootstrap | default(false) else opn_disabled_rules }}"
+
+- name: Đọc API key
+  ansible.builtin.set_fact:
+    opn_key: "{{ lookup('ansible.builtin.ini', 'key', file=opnsense_api_file, type='properties') }}"
+    opn_secret: "{{ lookup('ansible.builtin.ini', 'secret', file=opnsense_api_file, type='properties') }}"
+  no_log: true
+
+# ---------- VPN quản trị ----------
+- name: WireGuard
+  ansible.builtin.include_tasks: wireguard.yml
+  when: opn_role == "edge"   # VPN đặt ở vùng biên (như "VPN Gateway" của hệ thống thật)
+
+# ---------- Alias ----------
+- name: Alias đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/alias/search_item", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: aliases
+
+- name: Tạo alias còn thiếu
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/alias/add_item"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: { alias: "{{ item }}" }
+  loop: "{{ opn_aliases + (opn_aliases_host | default([])) }}"
+  loop_control: { label: "{{ item.name }}" }
+  when: item.name not in (aliases.json.rows | map(attribute='name'))
+  register: alias_add
+  changed_when: true
+  failed_when: alias_add.json.result | default('') != 'saved'
+
+- name: Cập nhật alias đã có nhưng nội dung khác (vd. thêm cổng)
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/alias/set_item/{{ (aliases.json.rows | selectattr('name', 'equalto', item.name) | first).uuid }}"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: { alias: "{{ item }}" }
+  loop: "{{ opn_aliases + (opn_aliases_host | default([])) }}"
+  loop_control: { label: "{{ item.name }}" }
+  when:
+    - item.name in (aliases.json.rows | map(attribute='name'))
+    - (aliases.json.rows | selectattr('name', 'equalto', item.name) | first).content != item.content
+  register: alias_set
+  changed_when: true
+  failed_when: alias_set.json.result | default('') != 'saved'
+
+- name: Áp dụng alias
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/alias/reconfigure", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  when: alias_add is changed or alias_set is changed
+
+# ---------- Virtual IP (biên): IP VPN đến qua protocol forwarding của GCP, giữ nguyên IP đích → phải là IP của WAN ----------
+- name: Virtual IP đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/interfaces/vip_settings/search_item", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: vips
+  when: opn_vips | default([]) | length > 0
+
+- name: Thêm Virtual IP (IP alias /32 trên WAN)
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/interfaces/vip_settings/add_item"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: { vip: { mode: ipalias, interface: "{{ item.interface }}", network: "{{ item.network }}", descr: "{{ item.descr }}" } }
+  loop: "{{ opn_vips | default([]) }}"
+  loop_control: { label: "{{ item.network }} trên {{ item.interface }}" }
+  when: item.descr not in (vips.json.rows | map(attribute='descr'))
+  register: vip_add
+  changed_when: true
+  failed_when: vip_add.json.result | default('') != 'saved'
+
+- name: Áp dụng Virtual IP
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/interfaces/vip_settings/reconfigure", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  when: vip_add is changed
+
+# ---------- Luật firewall ----------
+- name: Luật đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/filter/search_rule", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: rules
+
+- name: Tạo luật còn thiếu
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/filter/add_rule"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      rule: "{{ {'enabled': '1', 'direction': 'in', 'ipprotocol': 'inet', 'quick': '1'} | combine(item) }}"
+  loop: "{{ opn_rules_eff }}"
+  loop_control: { label: "{{ item.description }}" }
+  when: item.description not in (rules.json.rows | map(attribute='description'))
+  register: rule_add
+  changed_when: true
+  failed_when: rule_add.json.result | default('') != 'saved'
+
+- name: Cập nhật luật đã có nhưng nội dung khác (vd. siết cổng)
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/filter/set_rule/{{ (rules.json.rows | selectattr('description', 'equalto', item.description) | first).uuid }}"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body:
+      rule: "{{ {'direction': 'in', 'ipprotocol': 'inet', 'quick': '1', 'log': '0', 'destination_port': ''} | combine(item) | dict2items | rejectattr('key', 'equalto', 'enabled') | items2dict }}"
+  loop: "{{ opn_rules_eff }}"
+  loop_control: { label: "{{ item.description }}" }
+  vars:
+    cur: "{{ rules.json.rows | selectattr('description', 'equalto', item.description) | first | default({}) }}"
+    keys_cmp: [sequence, action, interface, protocol, source_net, destination_net, destination_port, log]
+    want: "{{ {'log': '0', 'destination_port': ''} | combine(item) }}"
+  when:
+    - item.description in (rules.json.rows | map(attribute='description'))
+    - keys_cmp | map('extract', want) | map('string') | map('lower') | list != keys_cmp | map('extract', cur) | map('string') | map('lower') | list
+  register: rule_set
+  changed_when: true
+  failed_when: rule_set.json.result | default('') != 'saved'
+
+- name: Đọc lại luật (lấy uuid)
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/filter/search_rule", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: rules_now
+
+# Luật đã bỏ khỏi thiết kế (vd. "VPN admin → mạng nội bộ" thay bằng đi qua jump server): xoá theo mô tả
+- name: Xoá luật không còn dùng
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/filter/del_rule/{{ item.uuid }}"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+  loop: "{{ rules_now.json.rows | selectattr('description', 'in', opn_removed_rules | default([])) | list }}"
+  loop_control: { label: "{{ item.description }}" }
+  register: rule_del
+  changed_when: true
+
+- name: Trạng thái bật/tắt mong muốn của từng luật
+  ansible.builtin.set_fact:
+    rule_want: >-
+      {{ dict(opn_rules_eff | map(attribute='description') | zip(opn_rules_eff | map(attribute='enabled', default='1')))
+         | combine(dict(opn_disabled_eff | zip(opn_disabled_eff | map('regex_replace', '^.*$', '0')))) }}
+
+- name: Bật/tắt luật cho khớp (kể cả tắt luật mặc định "allow LAN to any")
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/firewall/filter/toggle_rule/{{ item.uuid }}/{{ rule_want[item.description] }}"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: {}
+  loop: "{{ rules_now.json.rows | selectattr('uuid', 'search', '-') | selectattr('description', 'in', rule_want.keys() | list) | list }}"
+  loop_control: { label: "{{ item.description }} → {{ rule_want[item.description] }}" }
+  when: item.enabled | string != rule_want[item.description] | string
+  register: rule_toggle
+  changed_when: true
+
+- name: Áp dụng luật (giai đoạn bootstrap)
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/filter/apply", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  when: opn_bootstrap | default(false) and (rule_add is changed or rule_set is changed or rule_toggle is changed or rule_del is changed)
+
+- name: Phần còn lại (port forward, DNS, syslog, xoá luật bootstrap) — chỉ chạy qua VPN
+  ansible.builtin.include_tasks: full.yml
+  when: not (opn_bootstrap | default(false))

@@ -1,0 +1,21 @@
+# Thử trước bằng dry-run: API server liệt kê Pod đang chạy nào sẽ vi phạm, nếu có thì dừng.
+- name: Kiểm tra Pod hiện có có đạt chuẩn restricted không
+  ansible.builtin.command: >
+    kubectl label --dry-run=server --overwrite ns {{ item }}
+    pod-security.kubernetes.io/enforce=restricted
+  loop: "{{ psa_restricted_namespaces }}"
+  register: psa_check
+  changed_when: false
+  failed_when: "'violate' in psa_check.stderr"
+
+- name: Bật Pod Security "restricted" (enforce + cảnh báo + audit)
+  kubernetes.core.k8s:
+    kind: Namespace
+    name: "{{ item }}"
+    definition:
+      metadata:
+        labels:
+          pod-security.kubernetes.io/enforce: restricted
+          pod-security.kubernetes.io/warn: restricted
+          pod-security.kubernetes.io/audit: restricted
+  loop: "{{ psa_restricted_namespaces }}"

@@ -1,7 +1,7 @@
 # Cửa vào chuẩn của dự án: `make <lệnh>`. Logic nằm ở lab.sh / Ansible / tofu — Makefile chỉ gọi lại.
 # Gõ `make` (hoặc `make help`) để xem danh sách.
 .DEFAULT_GOAL := help
-.PHONY: help all plan up bootstrap cluster test lint fmt validate down cost vpn tunnel
+.PHONY: help all plan up bootstrap cluster test lint fmt validate down cost vpn tunnel stop start
 
 TOFU := tofu -chdir=tofu/envs/gcp
 
@@ -45,6 +45,12 @@ vpn: ## Bật VPN quản trị
 
 tunnel: ## SOCKS 127.0.0.1:1080 qua jump-01 (trình duyệt, kubectl)
 	./lab.sh tunnel up
+
+stop: ## TẮT VM, giữ cấu hình (~0,07 USD/giờ khi tắt). Từng máy: make stop ONLY="siem-01 edge-01"
+	./lab.sh stop $(ONLY)
+
+start: ## BẬT lại theo thứ tự firewall → jump → infra → master → worker → còn lại (chờ từng tầng sẵn sàng)
+	./lab.sh start $(ONLY)
 
 cost: ## Tài nguyên còn lại trong project
 	./lab.sh cost

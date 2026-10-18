@@ -109,6 +109,15 @@ def get(p, key, *args):
         return p["hosts"][host_in_group(p, args[0])[0]]["ip"]
     if key == "ssh_hosts":
         return "\n".join(f"{n} {h['ip']}" for n, h in p["hosts"].items())
+    if key == "group_hosts":   # tên các máy trong nhóm (cách nhau dấu cách)
+        return " ".join(host_in_group(p, args[0]))
+    if key == "start_order":   # thứ tự bật máy, mỗi dòng 1 tầng (tắt: ngược lại) — tầng sau cần tầng trước chạy
+        tiers = [list(p["firewalls"])]
+        for g in ("bastion", "infra", "k8s_control_plane", "k8s_workers"):
+            tiers.append(host_in_group(p, g))
+        done = {n for t in tiers for n in t}
+        tiers.append([n for n in p["hosts"] if n not in done])   # còn lại: edge-01, siem-01…
+        return "\n".join(" ".join(t) for t in tiers if t)
     if key == "domain":      # tên miền nội bộ (lab.internal)
         return p["domain"]
     if key == "gw_domain":   # tên miền của Gateway K8s: public | internal

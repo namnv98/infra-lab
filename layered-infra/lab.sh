@@ -11,6 +11,7 @@
 #   ./lab.sh browser     mở Chromium (profile riêng của lab) đi qua tunnel, sẵn các trang quản trị
 #   ./lab.sh cluster     Ansible dựng toàn bộ theo ansible/site.yml: mạng → K8s → addon → dịch vụ → app → bảo mật ‖ SIEM → backup
 #   ./lab.sh console [edge|core]  console nối tiếp của firewall (cứu hộ khi mất VPN)
+#   ./lab.sh stop|start [máy…]  TẮT/BẬT VM (giữ nguyên cấu hình, ~0,07 USD/giờ khi tắt); không ghi máy = cả lab theo đúng thứ tự
 #   ./lab.sh down        XOÁ SẠCH mọi tài nguyên (hỏi xác nhận) — dùng xong là xoá để không tốn credit
 #   ./lab.sh cost        liệt kê tài nguyên còn trong project
 set -euo pipefail
@@ -148,6 +149,36 @@ EOF
     [ $RK = 0 ] && [ $RO = 0 ] || { echo "!! nhánh lỗi (k8s=$RK ops=$RO), xem log ở trên"; exit 1; }
     ansible-playbook site.yml --tags backup ;;
   console) gcloud compute connect-to-serial-port "firewall-${2:-edge}-01" --zone "$ZONE" --project "$PROJECT" ;;
+  stop|start)
+    # Tắt/bật theo tầng (plan.py start_order): firewall → jump → infra → master → worker → còn lại; tắt thì ngược lại.
+    # Máy tắt: không tính tiền CPU/RAM, vẫn tính đĩa + IP tĩnh + forwarding rule (~0,07 USD/giờ thay vì ~0,33).
+    G() { gcloud compute instances "$1" "${@:2}" --zone "$ZONE" --project "$PROJECT" --quiet; }   # G stop|start <máy…>
+    wait_for() {  # wait_for <mô tả> <lệnh> — thử 5 giây/lần, tối đa 5 phút
+      local i; for i in $(seq 60); do eval "$2" >/dev/null 2>&1 && { echo "   ✓ $1"; return 0; }; sleep 5; done
+      echo "   ✗ $1: quá 5 phút — xem ./lab.sh console core"; return 1; }
+    if [ $# -gt 1 ]; then echo "== $1: ${*:2}"; G "$1" "${@:2}"; exit; fi   # chỉ các máy ghi tên
+    mapfile -t TIERS < <($PLAN start_order)
+    if [ "$1" = stop ]; then
+      for ((i = ${#TIERS[@]} - 1; i >= 0; i--)); do echo "== tắt: ${TIERS[i]}"; G stop ${TIERS[i]}; done
+      nmcli connection down gcp-lab >/dev/null 2>&1 || true
+      echo "Đã tắt cả lab (bật lại: make start)."; exit
+    fi
+    for t in "${TIERS[@]}"; do
+      echo "== bật: $t"; G start $t
+      if [[ $t == *firewall-* ]]; then        # VPN đi qua firewall biên; API core trả lời = định tuyến + DNS đã sẵn sàng
+        nmcli -t connection show --active | grep -q '^gcp-lab:' || "$LAB/lab.sh" vpn up >/dev/null
+        wait_for "firewall core trả lời qua VPN" "curl -sk -m 4 -o /dev/null https://$($PLAN dns)"
+      elif [[ " $t " == *" $($PLAN group_hosts bastion) "* ]]; then
+        wait_for "jump-01 mở SSH" "timeout 4 bash -c '</dev/tcp/$JUMP/22'"
+      elif [[ " $t " == *" $($PLAN group_hosts k8s_control_plane | cut -d' ' -f1) "* ]]; then
+        MASTER=$($PLAN group_ip k8s_control_plane)
+        wait_for "K8s API sẵn sàng" "'$LAB/lab.sh' ssh $MASTER 'sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw /readyz'"
+      fi
+    done
+    # Pod chạy lại sau khi node bật: chờ không còn pod nào khác Running/Completed (thường 2–4 phút)
+    MASTER=$($PLAN group_ip k8s_control_plane)
+    wait_for "mọi pod chạy lại" "[ \"\$('$LAB/lab.sh' ssh $MASTER 'sudo kubectl --kubeconfig /etc/kubernetes/admin.conf get pods -A --no-headers' 2>/dev/null | awk '\$4!=\"Running\" && \$4!=\"Completed\"' | wc -l)\" = 0 ]"
+    echo "Đã bật cả lab. Tunnel: ./lab.sh tunnel up · kiểm tra: make test" ;;
   down) tofu destroy; echo "== Kiểm tra còn sót gì không =="; "$LAB/lab.sh" cost ;;
   cost)
     echo "== Project $PROJECT: tài nguyên còn lại =="

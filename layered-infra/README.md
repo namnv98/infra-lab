@@ -100,6 +100,7 @@ make up                 # sinh config bootstrap + tạo hạ tầng (hỏi xác 
 make bootstrap          # console 2 firewall → API biên qua WAN dựng VPN → bật VPN → 10-network.yml cho cả hai qua VPN
 make cluster            # K8s → addon → Harbor/Squid → nạp cache → khoá egress → bảo mật ‖ SIEM → backup (~25 phút)
 make test               # kiểm thử đầu-cuối (~2 phút): 33 kiểm thử, thoát lỗi nếu có kiểm thử không đạt (./test/smoke.sh prod: chỉ 1 nhóm)
+make stop                # TẮT cả lab, giữ cấu hình (~0,07 USD/giờ thay vì ~0,33) · make start: bật lại theo tầng (~5 phút)
 ```
 
 Trước khi commit: `make lint` (yamllint, ansible-lint, tofu fmt, kiểm tra plan.yml) và `make validate` (cú pháp tofu/Ansible).

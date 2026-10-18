@@ -6,6 +6,7 @@
 
 platform: onprem
 domain: lab.internal          # đổi theo tên miền nội bộ thật (vd. corp.internal)
+mtu: 1500                     # MTU của switch/VLAN (jumbo frame: 9000 nếu cả đường đi hỗ trợ)
 
 zones:
   wan:     { cidr: 203.0.113.0/29, gateway: 203.0.113.1 }                        # IP public nhà mạng cấp (dải tài liệu, thay bằng thật)

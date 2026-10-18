@@ -60,7 +60,7 @@ else:                # core: không IP public → dải VPN (đi xuyên biên) g
 ROLES = {role: dict(hostname=fw_name, dns=FW["dns"], zones=zones_t, boot_rule=boot)}
 R = ROLES[role]
 ZONES = R["zones"]
-MTU = "1460"
+MTU = str(P.get("mtu", 1500))   # plan.yml (GCP: 1460 của VPC)
 
 
 def rnd(n):
@@ -113,7 +113,7 @@ u = s.find("user")
 sub(u, "password", crypt6(root_pw))
 sub(u, "apikeys", f"{api_key}|{crypt6(api_secret)}")
 
-# --- interfaces: IP tĩnh, MTU 1460 của VPC, tắt IPv6 ---
+# --- interfaces: IP tĩnh, MTU theo plan.yml, tắt IPv6 ---
 ifs = r.find("interfaces")
 for name, nic, ip, descr in ZONES:
     e = ifs.find(name)

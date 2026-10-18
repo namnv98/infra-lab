@@ -34,7 +34,7 @@
   no_log: true
   when: "'wg-admin' not in (wg_servers.json.rows | map(attribute='name'))"
 
-- name: WireGuard — tạo server wg-admin (MTU 1380 = 1460 của GCP − 80 header WireGuard)
+- name: WireGuard — tạo server wg-admin (MTU = mtu của plan.yml − 80 header WireGuard)
   ansible.builtin.uri:
     url: "{{ opnsense_url }}/api/wireguard/server/add_server"
     method: POST
@@ -48,7 +48,7 @@
         enabled: "1"
         name: wg-admin
         port: "{{ wg_port }}"
-        mtu: "1380"
+        mtu: "{{ plan.mtu | default(1500) - 80 }}"
         tunneladdress: "{{ wg_server_address }}"
         privkey: "{{ wg_keys.json.privkey }}"
         pubkey: "{{ wg_keys.json.pubkey }}"

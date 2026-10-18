@@ -51,12 +51,15 @@ Mọi thứ còn lại (`ansible/group_vars/`, playbook, role, `plan_inventory.p
 ansible-playbook -i inventories/onprem/inventory.py site.yml --tags bootstrap,network
 ```
 
+- **Mạng + NTP của VM** (`base/network`, theo `platform.yml`): `node_network_mode: static` → IP tĩnh từ `plan.yml`, gateway = firewall
+  của VLAN, MTU từ `plan.yml`; `ntp_client: systemd-timesyncd` → NTP = OPNsense. `base/quiet_os` bỏ qua agent của Google.
+- **MTU** khai báo 1 chỗ (`mtu` trong `plan.yml`): card OPNsense, VM, WireGuard (= mtu − 80).
+- **Máy cần có sẵn**: Ubuntu 24.04, user `ubuntu` sudo không hỏi mật khẩu, khoá SSH của máy admin, Python 3.
+
 ## Phải làm thêm trước khi chạy thật
 
 | # | Việc | Vì sao |
 |---|---|---|
-| 1 | Role `base/network`: nhánh IP tĩnh + gateway + VLAN theo `node_network_mode` | Hiện chỉ đổi DNS, giả định DHCP + route của VPC (GCP) |
-| 2 | Role `base/network`: NTP theo `ntp_client` (timesyncd) | Hiện ghi `/etc/chrony/chrony.conf` (image GCP dùng chrony) |
-| 3 | `lab.sh` (vpn, tunnel, browser…) đang gắn với GCP (`tofu output`) | Máy admin on-prem có thể ngồi trong LAN văn phòng |
-| 4 | StorageClass `standard`: đổi local-path → Longhorn/Ceph (≥3 worker, dữ liệu nhân bản giữa node) — app không phải sửa | local-path chỉ hợp lab 1 worker |
-| 5 | HA firewall (CARP), DB zone, HSM… theo sơ đồ hệ thống thật | Ngoài phạm vi bản mẫu |
+| 1 | `lab.sh` (vpn, tunnel, browser…) đang gắn với GCP (`tofu output`) | Máy admin on-prem có thể ngồi trong LAN văn phòng |
+| 2 | StorageClass `standard`: đổi local-path → Longhorn/Ceph (≥3 worker, dữ liệu nhân bản giữa node) — app không phải sửa | local-path chỉ hợp lab 1 worker |
+| 3 | HA firewall (CARP), DB zone, HSM… theo sơ đồ hệ thống thật | Ngoài phạm vi bản mẫu |

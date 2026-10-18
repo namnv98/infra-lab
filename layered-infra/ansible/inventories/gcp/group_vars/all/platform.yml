@@ -1,5 +1,7 @@
 # Đặc thù nền tảng GCP (on-prem: inventories/onprem/group_vars/all/platform.yml)
 node_interface: ens4                   # card mạng chính của VM trên GCP (KVM local: enp1s0)
+node_network_mode: dhcp                # IP + route do DHCP của VPC (route 0/0 của VPC trỏ vào OPNsense); Ansible chỉ đổi DNS
+ntp_client: chrony                     # image Ubuntu của GCP đồng bộ giờ bằng chrony
 
 tofu_dir: "{{ lab_root }}/tofu/envs/gcp"   # OpenTofu của môi trường này
 # GCP project/zone + IP public: đọc từ tofu (một nguồn duy nhất), chỉ dùng khi bootstrap firewall

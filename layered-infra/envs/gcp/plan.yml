@@ -9,6 +9,7 @@
 
 platform: gcp          # gcp: VPC (.1 là gateway của GCP, firewall .253) · onprem: VLAN (firewall là gateway)
 domain: lab.internal
+mtu: 1460             # MTU mạng (VPC của GCP: 1460) — card OPNsense, VM, WireGuard (= mtu − 80) đều theo số này
 
 # Vùng = VPC. gateway = gateway của VPC (.1); fw = card firewall làm "default gateway" của vùng (route VPC 0/0)
 zones:

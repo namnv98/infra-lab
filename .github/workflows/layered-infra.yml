@@ -1,0 +1,32 @@
+# CI cho layered-infra: lint + kiểm tra cú pháp mỗi lần push/PR đụng tới thư mục này. Không cần hạ tầng, không cần bí mật.
+name: layered-infra
+on:
+  push:
+    paths: [layered-infra/**, .github/workflows/layered-infra.yml]
+  pull_request:
+    paths: [layered-infra/**, .github/workflows/layered-infra.yml]
+
+defaults:
+  run:
+    working-directory: layered-infra
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: opentofu/setup-opentofu@v1
+      - name: Cài công cụ
+        run: |
+          pip install ansible-core ansible-lint yamllint
+          ansible-galaxy collection install -r ansible/requirements.yml
+          # tofu đọc khoá SSH công khai (metadata VM) — CI dùng khoá giả
+          mkdir -p ~/.ssh && ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519
+      - name: make lint (yamllint, ansible-lint, tofu fmt, plan.yml)
+        run: make lint
+      - name: make validate (tofu validate, ansible syntax-check)
+        run: |
+          tofu -chdir=tofu/envs/gcp init -backend=false -input=false
+          make validate

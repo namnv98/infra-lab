@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Inventory Ansible sinh từ plan.yml — DÙNG CHUNG mọi môi trường: mỗi inventories/<env>/inventory.py là symlink tới file này
-và đọc plan.yml cạnh symlink (inventories/<env>/plan.yml). Không ghi IP/tên máy ở chỗ khác.
+"""Inventory Ansible sinh từ plan.yml — DÙNG CHUNG mọi môi trường: mỗi inventories/<env>/inventory.py là symlink tới file này;
+tên thư mục chứa symlink = tên môi trường → đọc envs/<env>/plan.yml ở gốc dự án. Không ghi IP/tên máy ở chỗ khác.
 
 Nhóm theo VAI TRÒ (hosts.*.groups) + nhóm cha (k8s, linux) + nhóm theo VÙNG (zone_<vùng>) + firewalls.
 Biến: ansible_host từng VM; `plan` (toàn bộ plan.yml) cho mọi máy — group_vars đọc IP từ đây.
@@ -9,7 +9,8 @@ Kiểm tra:  ansible-inventory --graph   ·   ansible-inventory --host k8s-maste
 import json, pathlib, sys
 import yaml
 
-plan = yaml.safe_load((pathlib.Path(__file__).absolute().parent / "plan.yml").read_text())   # absolute, KHÔNG resolve: giữ thư mục của symlink
+ENV_DIR = pathlib.Path(__file__).absolute().parent   # absolute, KHÔNG resolve: giữ thư mục của symlink (ansible/inventories/<env>) → gốc dự án = parents[2]
+plan = yaml.safe_load((ENV_DIR.parents[2] / "envs" / ENV_DIR.name / "plan.yml").read_text())
 PARENTS = {"k8s": ["k8s_control_plane", "k8s_workers"]}   # nhóm cha: nhóm con theo vai trò
 
 

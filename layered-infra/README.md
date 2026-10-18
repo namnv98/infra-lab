@@ -66,10 +66,14 @@ VPN quản trị: máy admin 10.50.0.2 ⇄ IP VPN ⇄ wg0 trên biên → chỉ 
 
 ```
 layered-infra/
+├── Makefile          # cửa vào chuẩn: make help · up · bootstrap · cluster · test · lint · down (gọi lab.sh)
 ├── lab.sh            # điều khiển toàn bộ lab (xem bên dưới)
+├── envs/
+│   ├── gcp/plan.yml      # ★ NGUỒN IP DUY NHẤT của môi trường GCP: vùng, firewall, VM, route, VPN — tofu + Ansible + script đều đọc
+│   └── onprem/plan.yml   # bản mẫu on-prem (VLAN + transit, 3 master)
 ├── tofu/
 │   ├── modules/      # network (VPC, subnet, firewall VPC) · firewall (2 OPNsense, 2 IP public, route) · vm (Ubuntu)
-│   └── envs/gcp/     # đọc plan.yml → gọi 3 module; state, terraform.tfvars, moved.tf (đổi địa chỉ khi tách module)
+│   └── envs/gcp/     # đọc envs/gcp/plan.yml → gọi 3 module; state, terraform.tfvars, moved.tf (đổi địa chỉ khi tách module)
 ├── scripts/
 │   ├── plan.py                   # đọc/kiểm tra plan.yml (plan check, IP jump, cấu hình VPN) cho lab.sh và script khác
 │   ├── build-opnsense-image.sh   # startup-script của VM tạm: tải nano gốc, kiểm SHA256, ghi đĩa
@@ -77,7 +81,9 @@ layered-infra/
 │   ├── fw-console-bootstrap.py   # nạp config bootstrap qua serial console ở lần boot đầu
 │   └── harbor-prewarm.sh         # nạp cache Harbor bằng image cluster đang dùng
 ├── ansible/          # site.yml (thứ tự dựng) + playbook 00–80 + inventories/{gcp,onprem} + group_vars + roles/<tầng>/<tên>  (đọc docs/ansible-doc.md)
+├── test/smoke.sh     # kiểm thử đầu-cuối trên lab đang chạy (make test): web/WAF, VPN, egress, DMZ, cluster, SIEM
 ├── docs/             # architecture.html (sơ đồ, luồng, ma trận luật — sinh từ docs/src/*.py) · ansible-doc.md
+├── .editorconfig · .yamllint   # định dạng chung, luật yamllint (pre-commit + CI ở gốc repo: ../.pre-commit-config.yaml, ../.github/)
 └── out/              # bí mật, kubeconfig, log — KHÔNG commit (đã có trong .gitignore)
 ```
 
@@ -90,10 +96,14 @@ Cần: `gcloud` đã đăng nhập, `tofu`, `ansible`, `nmcli` (NetworkManager),
 ```bash
 cd ~/labs/infra-lab/layered-infra
 ./lab.sh image          # 1 lần: golden image OPNsense dựng ngay trên GCP (~5 phút)
-./lab.sh up             # sinh config bootstrap + tạo hạ tầng (hỏi xác nhận)
-./lab.sh fw-bootstrap   # console 2 firewall → API biên qua WAN dựng VPN → bật VPN → 10-network.yml cho cả hai qua VPN
-./lab.sh cluster        # firewall → K8s → addon → Harbor/Squid → nạp cache → khoá egress → bảo mật → SIEM
+make up                 # sinh config bootstrap + tạo hạ tầng (hỏi xác nhận)
+make bootstrap          # console 2 firewall → API biên qua WAN dựng VPN → bật VPN → 10-network.yml cho cả hai qua VPN
+make cluster            # K8s → addon → Harbor/Squid → nạp cache → khoá egress → bảo mật ‖ SIEM → backup (~25 phút)
+make test               # kiểm thử đầu-cuối (~1 phút): 25 kiểm thử, thoát lỗi nếu có kiểm thử không đạt
 ```
+
+Trước khi commit: `make lint` (yamllint, ansible-lint, tofu fmt, kiểm tra plan.yml) và `make validate` (cú pháp tofu/Ansible).
+CI trên GitHub chạy đúng 2 lệnh này mỗi lần push.
 
 Ghi chú: `./lab.sh image` và `./lab.sh up` lần đầu đều cần VPC `lab-wan` (VM tạm dựng image nằm trong đó),
 nên nếu chưa có hạ tầng thì tạo mạng trước: `cd tofu/envs/gcp && tofu apply -target=module.network`.
@@ -112,7 +122,7 @@ ansible-playbook site.yml --list-tags             # tag: bootstrap (chỉ khi g�
 ansible-lint                                      # kiểm tra trước khi chạy (.ansible-lint)
 ```
 
-**Đổi IP / thêm máy**: chỉ sửa `ansible/inventories/gcp/plan.yml` → `python3 scripts/plan.py check` (IP ngoài dải,
+**Đổi IP / thêm máy**: chỉ sửa `envs/gcp/plan.yml` → `python3 scripts/plan.py check` (IP ngoài dải,
 trùng, IP GCP giữ, quá số card) → `./lab.sh plan` → `./lab.sh up` / chạy Ansible. tofu, inventory, alias firewall,
 config bootstrap OPNsense, `lab.sh`, `harbor-prewarm.sh` đều đọc từ đó.
 

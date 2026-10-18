@@ -22,18 +22,16 @@ ansible/
 ├── ops-etcd-restore.yml              # chạy tay: KHÔI PHỤC etcd từ snapshot (phá huỷ thay đổi sau snapshot)
 │
 ├── inventories/
-│   ├── plan_inventory.py             # sinh inventory từ plan.yml: nhóm theo vai trò + theo vùng, ansible_host, biến `plan`
+│   ├── plan_inventory.py             # sinh inventory từ envs/<env>/plan.yml (gốc dự án): nhóm theo vai trò + vùng, ansible_host, biến `plan`
 │   ├── gcp/                          # MÔI TRƯỜNG GCP (đang chạy, mặc định)
-│   │   ├── plan.yml                  #   NGUỒN IP DUY NHẤT: vùng, 2 firewall, VM, route, VPN, VIP/Gateway K8s (tofu cũng đọc)
-│   │   ├── inventory.py              #   symlink → ../plan_inventory.py (đọc plan.yml cạnh nó)
+│   │   ├── inventory.py              #   symlink → ../plan_inventory.py (đọc envs/gcp/plan.yml)
 │   │   ├── group_vars/all/platform.yml  # đặc thù GCP: card ens4, project/zone, tofu_dir = tofu/envs/gcp, IP public lấy từ tofu output
 │   │   └── host_vars/
 │   │       ├── firewall-edge-01.yml  #   luật firewall biên (WAN, VPN, DMZ), NAT ra Internet, IP VPN riêng
 │   │       └── firewall-core-01.yml  #   luật firewall core (DMZ→trong, LAN, MGMT)
 │   └── onprem/                       # MÔI TRƯỜNG ON-PREM (bản mẫu) — cùng cấu trúc như gcp/
 │       ├── README.md                 #   khác GCP ở đâu, đã làm gì, còn thiếu gì
-│       ├── plan.yml                  #   VLAN + transit, firewall là gateway .1, 3 master + 2 worker
-│       ├── inventory.py              #   symlink → ../plan_inventory.py
+│       ├── inventory.py              #   symlink → ../plan_inventory.py (đọc envs/onprem/plan.yml: VLAN + transit, 3 master)
 │       ├── group_vars/all/platform.yml  # card enp1s0, IP tĩnh, bootstrap qua USB, IP public = card WAN
 │       └── host_vars/                #   luật 2 firewall (biên: lan=transit, opt1=DMZ · core: wan=transit)
 │

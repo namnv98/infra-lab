@@ -20,7 +20,7 @@ PROJECT=$(awk -F'"' '/^project_id/{print $2}' terraform.tfvars)
 ZONE=$(awk -F'"' '/^zone/{print $2}' terraform.tfvars)
 REGION=$(awk -F'"' '/^region/{print $2}' terraform.tfvars)
 IMAGE=opnsense-26-7-nano
-PLAN="python3 -I $LAB/scripts/plan.py get"   # IP lấy từ ansible/inventories/gcp/plan.yml (nguồn duy nhất)
+PLAN="python3 -I $LAB/scripts/plan.py get"   # IP lấy từ envs/gcp/plan.yml (nguồn duy nhất)
 JUMP=$($PLAN jump_ip)    # jump server (bastion) trong MGMT
 
 case "${1:-plan}" in

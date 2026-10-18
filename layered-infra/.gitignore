@@ -6,3 +6,5 @@ tofu/**/*.tfplan
 out/
 ansible/.ansible/   # cache của ansible-lint/collection
 __pycache__/
+# cấu hình riêng của IDE
+.idea/

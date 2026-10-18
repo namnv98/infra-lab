@@ -1,0 +1,36 @@
+# Kiểm tra trước mỗi commit (cài 1 lần: pipx install pre-commit && pre-commit install).
+# Chỉ áp cho layered-infra/ — các thư mục khác của repo giữ nguyên như cũ.
+files: ^layered-infra/
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key          # chặn lỡ commit khoá riêng
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        exclude: \.md$
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [-c, layered-infra/.yamllint]
+  - repo: https://github.com/tofuutils/pre-commit-opentofu
+    rev: v2.1.0
+    hooks:
+      - id: tofu_fmt
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: [-S, warning]
+  - repo: local
+    hooks:
+      - id: ansible-lint                 # dùng ansible-lint đã cài trên máy (cùng phiên bản với lúc chạy)
+        name: ansible-lint
+        entry: bash -c 'cd layered-infra/ansible && ansible-lint'
+        language: system
+        files: ^layered-infra/ansible/
+        pass_filenames: false

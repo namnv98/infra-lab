@@ -1,10 +1,10 @@
 # Môi trường GCP: lab on-prem dựng trên GCP — chỉ dùng thứ GCP bắt buộc (VPC, route, VM, đĩa, IP public).
 # Firewall/NAT/DNS/VPN = OPNsense; cửa vào = HAProxy ở DMZ; registry, proxy, SIEM tự host.
-# Quy hoạch mạng + máy: NGUỒN DUY NHẤT ansible/inventories/gcp/plan.yml (Ansible đọc cùng file).
+# Quy hoạch mạng + máy: NGUỒN DUY NHẤT envs/gcp/plan.yml (Ansible đọc cùng file).
 # File này chỉ đổi plan → tham số cho 3 module: network (VPC), firewall (OPNsense, IP public, route), vm (Linux).
 locals {
   lab  = "${path.root}/../../.."
-  plan = yamldecode(file("${local.lab}/ansible/inventories/gcp/plan.yml"))
+  plan = yamldecode(file("${local.lab}/envs/gcp/plan.yml"))
 
   zones = { for k, v in local.plan.zones : k => { cidr = v.cidr } }
 

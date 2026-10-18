@@ -2,7 +2,7 @@
 # Đổi IP / thêm máy: sửa ở đây, rồi `python3 scripts/plan.py check`, `./lab.sh plan`, chạy Ansible.
 # Ai đọc file này:
 #   tofu/envs/gcp/main.tf (yamldecode)   → VPC, VM, card firewall, alias IP, route
-#   inventories/gcp/inventory.py         → nhóm máy + ansible_host cho Ansible; biến `plan` cho group_vars
+#   ansible/inventories/gcp/inventory.py → nhóm máy + ansible_host cho Ansible; biến `plan` cho group_vars
 #   scripts/opnsense-bootstrap.py          → card, gateway, route của 2 firewall
 #   scripts/plan.py (lab.sh, harbor-prewarm.sh) → IP jump, cấu hình VPN
 # GCP giữ .0 .1 .254 .255 của mỗi subnet: gateway VPC luôn là .1, không đặt máy vào .1/.254.

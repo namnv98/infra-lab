@@ -1,0 +1,22 @@
+# yamllint cho dự án: giữ luật bắt lỗi thật (cú pháp, trùng khoá, thụt lề), nới luật thuần phong cách
+extends: default
+ignore: |
+  out/
+  tofu/**/.terraform/
+rules:
+  line-length: disable          # comment giải thích tiếng Việt thường dài
+  document-start: disable       # không bắt buộc "---" đầu file
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  commas: disable               # bảng luật firewall cố ý căn thẳng cột
+  colons: disable
+  braces:
+    max-spaces-inside: 1
+  brackets:
+    max-spaces-inside: 1
+  truthy:
+    allowed-values: ["true", "false", "yes", "no"]
+    check-keys: false
+  octal-values:
+    forbid-implicit-octal: true

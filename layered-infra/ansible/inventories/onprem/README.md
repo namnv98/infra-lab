@@ -1,6 +1,6 @@
 # Môi trường on-prem (BẢN MẪU)
 
-Cùng playbook, cùng role với lab GCP — chỉ khác inventory. IP trong `plan.yml` là minh hoạ; khi có hệ thống thật, sửa `plan.yml`
+Cùng playbook, cùng role với lab GCP — chỉ khác inventory. IP trong `envs/onprem/plan.yml` là minh hoạ; khi có hệ thống thật, sửa file đó
 rồi kiểm tra:
 
 ```bash
@@ -13,7 +13,7 @@ ansible-playbook -i inventories/onprem/inventory.py site.yml --tags …
 
 | File | Nội dung |
 |---|---|
-| `plan.yml` | Vùng/VLAN, 2 firewall (card, IP), VM (IP, vai trò), route, VPN, VIP/Gateway K8s — nguồn IP duy nhất |
+| `envs/onprem/plan.yml` (gốc dự án) | Vùng/VLAN, 2 firewall (card, IP), VM (IP, vai trò), route, VPN, VIP/Gateway K8s — nguồn IP duy nhất |
 | `group_vars/all/platform.yml` | Đặc thù nền tảng: card mạng (`enp1s0`), cách cấu hình mạng/NTP, cách bootstrap firewall |
 | `host_vars/firewall-*.yml` | Luật của 2 firewall (tên card khác GCP) |
 

@@ -1,6 +1,6 @@
-# QUY HOẠCH MẠNG + MÁY của môi trường ON-PREM — NGUỒN DUY NHẤT của mọi IP (cùng cấu trúc với inventories/gcp/plan.yml).
+# QUY HOẠCH MẠNG + MÁY của môi trường ON-PREM — NGUỒN DUY NHẤT của mọi IP (cùng cấu trúc với envs/gcp/plan.yml).
 # ⚠ BẢN MẪU: IP minh hoạ, chưa có hệ thống thật. Xem inventories/onprem/README.md (phần nào dùng được ngay, phần nào phải làm thêm).
-# Kiểm tra:  LAB_ENV=onprem python3 scripts/plan.py check  ·  ansible-inventory -i inventories/onprem/inventory.py --graph
+# Kiểm tra:  LAB_ENV=onprem python3 scripts/plan.py check  ·  cd ansible && ansible-inventory -i inventories/onprem/inventory.py --graph
 # Khác GCP: mỗi vùng là 1 VLAN trên switch, FIREWALL CHÍNH LÀ GATEWAY (.1); có VLAN transit riêng giữa biên và core;
 # không cần alias IP (kube-vip/MetalLB trả lời ARP thật); số card firewall không bị giới hạn theo vCPU.
 

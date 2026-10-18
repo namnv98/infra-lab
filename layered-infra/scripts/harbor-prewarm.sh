@@ -6,7 +6,7 @@
 #   scripts/harbor-prewarm.sh img1 img2  # hoặc chỉ định
 set -uo pipefail
 LAB=$(cd "$(dirname "$0")/.." && pwd)
-PLAN="python3 -I $LAB/scripts/plan.py get"   # IP từ ansible/inventories/gcp/plan.yml
+PLAN="python3 -I $LAB/scripts/plan.py get"   # IP từ envs/gcp/plan.yml
 SVC=ubuntu@$($PLAN group_ip infra)
 CP=ubuntu@$($PLAN group_ip k8s_control_plane)
 JUMP=ubuntu@$($PLAN jump_ip)

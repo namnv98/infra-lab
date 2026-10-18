@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Đọc quy hoạch mạng ansible/inventories/<env>/plan.yml — nguồn duy nhất của mọi IP.
+"""Đọc quy hoạch mạng envs/<env>/plan.yml — nguồn duy nhất của mọi IP.
 
 Dùng như thư viện (opnsense-bootstrap.py) hoặc lệnh cho shell (lab.sh, harbor-prewarm.sh):
   plan.py check                     kiểm tra plan hợp lệ (IP trong dải, không trùng, không dùng IP GCP giữ, số card ≤ vCPU)
@@ -17,7 +17,7 @@ import ipaddress, os, pathlib, sys
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PLAN = ROOT / "ansible/inventories" / os.environ.get("LAB_ENV", "gcp") / "plan.yml"
+PLAN = ROOT / "envs" / os.environ.get("LAB_ENV", "gcp") / "plan.yml"
 VCPU = {"e2-micro": 2, "e2-small": 2, "e2-medium": 2, "e2-standard-2": 2, "e2-highcpu-4": 4, "e2-standard-4": 4}
 
 
@@ -109,6 +109,10 @@ def get(p, key, *args):
         return p["hosts"][host_in_group(p, args[0])[0]]["ip"]
     if key == "ssh_hosts":
         return "\n".join(f"{n} {h['ip']}" for n, h in p["hosts"].items())
+    if key == "domain":      # tên miền nội bộ (lab.internal)
+        return p["domain"]
+    if key == "gw_domain":   # tên miền của Gateway K8s: public | internal
+        return p["k8s"]["gateways"][args[0]]["domain"]
     if key == "vpn_admin":
         return p["vpn"]["admin"]
     if key == "fw_gui":   # biên: card DMZ; core: card LAN (theo thứ tự xuất hiện, bỏ trùng)

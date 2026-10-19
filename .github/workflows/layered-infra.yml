@@ -22,11 +22,11 @@ jobs:
         run: |
           pip install ansible-core ansible-lint yamllint
           ansible-galaxy collection install -r ansible/requirements.yml
-          # tofu đọc khoá SSH công khai (metadata VM) — CI dùng khoá giả
+          # tofu của bộ tạo máy GCP đọc khoá SSH công khai (metadata VM) — CI dùng khoá giả
           mkdir -p ~/.ssh && ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519
       - name: make lint (yamllint, ansible-lint, tofu fmt, plan.yml)
         run: make lint
-      - name: make validate (tofu validate, ansible syntax-check)
+      - name: make validate (ansible syntax-check mọi môi trường, tofu validate của provision/gcp)
         run: |
-          tofu -chdir=tofu/envs/gcp init -backend=false -input=false
+          tofu -chdir=provision/gcp init -backend=false -input=false
           make validate

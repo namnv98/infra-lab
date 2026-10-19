@@ -3,7 +3,7 @@
 
 Chỉ chứa phần tối thiểu để Ansible vào được qua API lần đầu:
   - gán card + IP + MTU, gateway từng vùng, route, DNS hệ thống (theo vai edge/core)
-  - mật khẩu root + 1 API key (sinh ngẫu nhiên, lưu ở out/)
+  - mật khẩu root + 1 API key (sinh ngẫu nhiên, lưu ở out/<env>/)
   - 1 luật TẠM trên WAN: chỉ IP public của máy admin được vào API (443). Ansible xoá luật này khi VPN đã chạy.
 Mọi thứ khác (VPN, alias, luật, NAT, DNS nội bộ, syslog) do role Ansible `opnsense` cấu hình.
 
@@ -26,7 +26,9 @@ import plan as planlib
 P = planlib.load()
 fw_name, FW = next((k, f) for k, f in P["firewalls"].items() if f["role"] == role)
 GCP = P.get("platform", "gcp") == "gcp"
-zones_t = [(n["if"], f"vtnet{i}", n["ip"], n.get("descr")) for i, n in enumerate(FW["nics"])]
+# dev: tên card trong FreeBSD — mặc định vtnet<i> (virtio: KVM/Proxmox/GCP); VMware: vmx<i>, máy thật: igb<i>/em<i>/ix<i> → ghi dev trong plan
+zones_t = [(n["if"], n.get("dev", f"vtnet{i}"), n["ip"], n.get("descr"), P["zones"][n["zone"]]["cidr"].split("/")[1])
+           for i, n in enumerate(FW["nics"])]
 my_nic = {n["zone"]: n for n in FW["nics"]}
 GW, RT = [], []   # gateway: (tên, card, IP, mặc định?, far?) · route tĩnh: (mạng, tên gateway, mô tả)
 if GCP:
@@ -103,7 +105,7 @@ for t in ("trigger_initial_wizard",):  # không bắt chạy wizard trên GUI
 # --- system ---
 s = r.find("system")
 sub(s, "hostname", R["hostname"])
-sub(s, "domain", "lab.internal")
+sub(s, "domain", P["domain"])
 sub(s, "dnsserver", R["dns"])
 # Bỏ luật anti-lockout (GUI mở cho card "LAN"): ở biên "LAN" là DMZ → edge-01 sẽ vào được GUI. Quản trị chỉ theo luật.
 sub(s.find("webgui"), "noantilockout", "1")
@@ -115,7 +117,7 @@ sub(u, "apikeys", f"{api_key}|{crypt6(api_secret)}")
 
 # --- interfaces: IP tĩnh, MTU theo plan.yml, tắt IPv6 ---
 ifs = r.find("interfaces")
-for name, nic, ip, descr in ZONES:
+for name, nic, ip, descr, prefix in ZONES:
     e = ifs.find(name)
     if e is None:
         e = ET.SubElement(ifs, name)
@@ -126,7 +128,7 @@ for name, nic, ip, descr in ZONES:
     sub(e, "if", nic)
     sub(e, "mtu", MTU)
     sub(e, "ipaddr", ip)
-    sub(e, "subnet", "24")
+    sub(e, "subnet", prefix)   # đúng dải của vùng (on-prem: WAN/transit /29)
     if descr:
         sub(e, "descr", descr)
     if name == "wan":
@@ -164,7 +166,7 @@ def route(net, gname, descr):
 
 for gname, iface, gip, dflt, far in GW:
     g = ET.SubElement(gws, "gateway_item", {"uuid": str(uuid.uuid4())})
-    zname = next((d or n.upper()) for n, _, _, d in ZONES if n == iface)
+    zname = next((d or n.upper()) for n, _, _, d, _ in ZONES if n == iface)
     for k, v in [("disabled", "0"), ("name", gname), ("descr", f"Gateway VPC vùng {zname}" if GCP else f"Gateway {gname} ({gip})"),
                  ("interface", iface), ("ipprotocol", "inet"), ("gateway", gip), ("defaultgw", "1" if dflt else "0"),
                  ("fargw", "1" if far else "0"), ("monitor_disable", "1"), ("priority", "255"), ("weight", "1")]:

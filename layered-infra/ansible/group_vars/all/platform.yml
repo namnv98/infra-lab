@@ -1,0 +1,7 @@
+# Đặc thù máy (image, hypervisor) — đọc từ plan.yml (node, public), giống nhau mọi môi trường. Không biết máy do ai tạo.
+node_interface: "{{ plan.node.interface }}"      # card mạng chính của VM Linux (GCP: ens4 · KVM/Proxmox: enp1s0)
+node_network_mode: "{{ plan.node.network }}"     # dhcp: nền tảng cấp đúng IP trong plan · static: Ansible ghi IP + gateway vào netplan
+ntp_client: "{{ plan.node.ntp }}"                # chrony | systemd-timesyncd (dịch vụ có sẵn trong image)
+# IP public của firewall biên (plan.yml hoặc provisioned.yml do bộ tạo máy ghi)
+fw_public_ip: "{{ plan.public.web }}"           # IP web: 80/443, API biên lúc bootstrap
+vpn_public_ip: "{{ plan.public.vpn }}"          # Endpoint WireGuard (GCP: IP riêng qua protocol forwarding · on-prem: = IP web)

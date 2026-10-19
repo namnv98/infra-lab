@@ -1,9 +1,0 @@
-# Đặc thù nền tảng ON-PREM (GCP: inventories/gcp/group_vars/all/platform.yml)
-node_interface: enp1s0                 # card mạng chính của VM trên KVM/Proxmox (GCP: ens4)
-
-node_network_mode: static              # IP tĩnh từ plan.yml + gateway = firewall của VLAN (GCP: DHCP của VPC)
-ntp_client: systemd-timesyncd          # Ubuntu cài thường dùng timesyncd (GCP: chrony)
-firewall_bootstrap: usb                # GCP: serial console + metadata · on-prem: USB chứa /conf/config.xml (00-firewall-bootstrap.yml)
-
-# IP public của firewall biên = card WAN trong plan (GCP: đọc từ tofu)
-fw_public_ip: "{{ (plan.firewalls['firewall-edge-01'].nics | selectattr('zone', 'equalto', 'wan') | first).ip }}"

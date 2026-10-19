@@ -3,7 +3,7 @@ variable "region" { type = string }
 variable "zone" { type = string }
 
 variable "image" {
-  description = "Image OPNsense tự đưa lên (./lab.sh image)"
+  description = "Image OPNsense tự đưa lên (provision/gcp/gcp.sh image)"
   type        = string
 }
 
@@ -28,7 +28,7 @@ variable "routes" {
 
 variable "vpn_port" { type = number }
 variable "bootstrap_dir" {
-  description = "Thư mục chứa opnsense-<vai>-bootstrap.xml (out/)"
+  description = "Thư mục chứa opnsense-<vai>-bootstrap.xml (out/gcp/)"
   type        = string
 }
 

@@ -6,4 +6,5 @@
   tasks:
     - name: Kéo trước qua Harbor mọi image đang chạy
       ansible.builtin.command: "{{ lab_root | default(playbook_dir ~ '/..') }}/scripts/harbor-prewarm.sh"
+      environment: { LAB_ENV: "{{ lab_env }}" }
       changed_when: false

@@ -8,6 +8,11 @@ platform: onprem
 domain: lab.internal          # đổi theo tên miền nội bộ thật (vd. corp.internal)
 mtu: 1500                     # MTU của switch/VLAN (jumbo frame: 9000 nếu cả đường đi hỗ trợ)
 
+# VM Linux: card mạng chính, IP tĩnh do Ansible ghi netplan (gateway = firewall của VLAN), Ubuntu cài thường dùng timesyncd
+node: { interface: enp1s0, network: static, ntp: systemd-timesyncd }
+# IP public của firewall biên (= card WAN, VPN dùng chung IP này)
+public: { web: 203.0.113.2, vpn: 203.0.113.2 }
+
 zones:
   wan:     { cidr: 203.0.113.0/29, gateway: 203.0.113.1 }                        # IP public nhà mạng cấp (dải tài liệu, thay bằng thật)
   transit: { cidr: 10.30.0.0/29,   gateway: 10.30.0.1, vlan: 30 }                 # chỉ 2 firewall: biên .1 ↔ core .2
@@ -50,7 +55,7 @@ firewalls:
       - { zone: transit, ip: 10.30.0.2,    if: wan,  descr: TRANSIT, default_gw: true }
       - { zone: mgmt,    ip: 10.40.0.1,    if: opt1, descr: MGMT }
 
-# VM trên hypervisor (Proxmox/VMware…) — type/disk chỉ ghi chú, không có tofu tạo máy
+# VM tạo bằng bất kỳ cách nào (Proxmox/VMware/máy thật) — type/disk chỉ ghi chú; chỉ cần chạy đúng IP dưới đây
 hosts:
   k8s-master-01: { groups: [k8s_control_plane], zone: lan,  ip: 10.20.0.11,  type: "4 vCPU · 8GB", disk: 60 }
   k8s-master-02: { groups: [k8s_control_plane], zone: lan,  ip: 10.20.0.12,  type: "4 vCPU · 8GB", disk: 60 }

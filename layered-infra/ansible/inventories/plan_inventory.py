@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """Inventory Ansible sinh từ plan.yml — DÙNG CHUNG mọi môi trường: mỗi inventories/<env>/inventory.py là symlink tới file này;
-tên thư mục chứa symlink = tên môi trường → đọc envs/<env>/plan.yml ở gốc dự án. Không ghi IP/tên máy ở chỗ khác.
+tên thư mục chứa symlink = tên môi trường → đọc envs/<env>/plan.yml (+ provisioned.yml) bằng scripts/plan.py. Không ghi IP/tên máy ở chỗ khác.
 
 Nhóm theo VAI TRÒ (hosts.*.groups) + nhóm cha (k8s, linux) + nhóm theo VÙNG (zone_<vùng>) + firewalls.
-Biến: ansible_host từng VM; `plan` (toàn bộ plan.yml) cho mọi máy — group_vars đọc IP từ đây.
+Biến: ansible_host từng VM; `plan` (toàn bộ plan.yml) + `lab_env` (tên môi trường) cho mọi máy — group_vars đọc IP từ đây.
 Kiểm tra:  ansible-inventory --graph   ·   ansible-inventory --host k8s-master-01
 """
 import json, pathlib, sys
-import yaml
 
 ENV_DIR = pathlib.Path(__file__).absolute().parent   # absolute, KHÔNG resolve: giữ thư mục của symlink (ansible/inventories/<env>) → gốc dự án = parents[2]
-plan = yaml.safe_load((ENV_DIR.parents[2] / "envs" / ENV_DIR.name / "plan.yml").read_text())
+sys.path.insert(0, str(ENV_DIR.parents[2] / "scripts"))
+import plan as planlib  # noqa: E402
+plan = planlib.load(ENV_DIR.name)
 PARENTS = {"k8s": ["k8s_control_plane", "k8s_workers"]}   # nhóm cha: nhóm con theo vai trò
 
 
 def inventory():
-    inv = {"_meta": {"hostvars": {}}, "all": {"children": ["firewalls", "linux"], "vars": {"plan": plan}},
+    inv = {"_meta": {"hostvars": {}}, "all": {"children": ["firewalls", "linux"], "vars": {"plan": plan, "lab_env": ENV_DIR.name}},
            "firewalls": {"hosts": list(plan["firewalls"])}}
     roles = {}
     for name, h in plan["hosts"].items():

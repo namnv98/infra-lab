@@ -19,11 +19,15 @@
   loop: [snapd.service, snapd.socket, snapd.seeded.service]
   failed_when: false
 
-# Agent của Google trên image GCP gọi *.googleapis.com — server không ra Internet nên bị chặn liên tục (nhiễu SIEM).
+# Agent của Google (chỉ có trên image GCP) gọi *.googleapis.com — server không ra Internet nên bị chặn liên tục (nhiễu SIEM).
+# Nhận biết theo dịch vụ có trên máy, không theo tên nền tảng: image khác không có agent thì bỏ qua.
+- name: Dịch vụ đang có trên máy
+  ansible.builtin.service_facts:
+
 # OS Config (vá OS qua GCP): lab không dùng → tắt hẳn. Guest agent: GIỮ (nạp khoá SSH từ metadata), chỉ tắt đẩy log lên Cloud Logging.
 - name: Tắt google-osconfig-agent (không dùng OS Config của GCP)
   ansible.builtin.systemd_service: { name: google-osconfig-agent, enabled: false, state: stopped, masked: true }
-  when: plan.platform == 'gcp'           # agent của Google chỉ có trên image GCP
+  when: "'google-osconfig-agent.service' in ansible_facts.services"
   failed_when: false
 
 - name: Guest agent không đẩy log lên Cloud Logging
@@ -34,9 +38,9 @@
     value: "false"
     mode: "0644"
   register: guest_cfg
-  when: plan.platform == 'gcp'
+  when: "'google-guest-agent.service' in ansible_facts.services"
 
 - name: Nạp lại guest agent
   ansible.builtin.systemd_service: { name: google-guest-agent, state: restarted }
-  when: plan.platform == 'gcp' and guest_cfg is changed
+  when: guest_cfg is changed
   failed_when: false

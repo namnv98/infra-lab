@@ -1,6 +1,7 @@
 # Ansible — từng file làm gì
 
-Thư mục `ansible/` của layered-infra. Chạy lệnh trong `ansible/` (đã có `ansible.cfg`); `out/` = thư mục bí mật/log ở gốc dự án (không commit).
+Thư mục `ansible/` của layered-infra. Chạy lệnh trong `ansible/` (đã có `ansible.cfg`); `out/<env>/` = thư mục bí mật/log của từng môi trường ở gốc dự án (không commit).
+Ansible không biết máy do ai tạo (tofu, tay, hypervisor…): chỉ đọc `envs/<env>/plan.yml` (+ `provisioned.yml` nếu bộ tạo máy ghi ra).
 
 ```
 ansible/
@@ -23,29 +24,28 @@ ansible/
 ├── ops-upgrade-cluster.yml           # chạy tay: NÂNG CẤP K8s lên k8s_version (snapshot etcd, kubeadm upgrade, drain từng node)
 │
 ├── inventories/
-│   ├── plan_inventory.py             # sinh inventory từ envs/<env>/plan.yml (gốc dự án): nhóm theo vai trò + vùng, ansible_host, biến `plan`
+│   ├── plan_inventory.py             # sinh inventory từ envs/<env>/plan.yml (qua scripts/plan.py): nhóm theo vai trò + vùng, ansible_host, biến `plan`, `lab_env`
 │   ├── gcp/                          # MÔI TRƯỜNG GCP (đang chạy, mặc định)
 │   │   ├── inventory.py              #   symlink → ../plan_inventory.py (đọc envs/gcp/plan.yml)
-│   │   ├── group_vars/all/platform.yml  # đặc thù GCP: card ens4, project/zone, tofu_dir = tofu/envs/gcp, IP public lấy từ tofu output
 │   │   └── host_vars/
 │   │       ├── firewall-edge-01.yml  #   luật firewall biên (WAN, VPN, DMZ), NAT ra Internet, IP VPN riêng
 │   │       └── firewall-core-01.yml  #   luật firewall core (DMZ→trong, LAN, MGMT)
 │   └── onprem/                       # MÔI TRƯỜNG ON-PREM (bản mẫu) — cùng cấu trúc như gcp/
 │       ├── README.md                 #   khác GCP ở đâu, đã làm gì, còn thiếu gì
 │       ├── inventory.py              #   symlink → ../plan_inventory.py (đọc envs/onprem/plan.yml: VLAN + transit, 3 master)
-│       ├── group_vars/all/platform.yml  # card enp1s0, IP tĩnh, bootstrap qua USB, IP public = card WAN
 │       └── host_vars/                #   luật 2 firewall (biên: lan=transit, opt1=DMZ · core: wan=transit)
 │
 ├── group_vars/                       # BIẾN DÙNG CHUNG mọi môi trường (giá trị IP đều lấy từ plan.yml)
 │   ├── all/
 │   │   ├── versions.yml              #   MỌI phiên bản phần mềm (K8s, Cilium, Harbor…)
 │   │   ├── network.yml               #   tên dễ dùng cho IP trong plan: svc_ip, mon_ip, jump_ip, api_vip, proxy_url, proxy_no…
-│   │   ├── paths.yml                 #   đường dẫn trên máy admin (lab_root, lab_out), SSH xuyên jump-01
+│   │   ├── paths.yml                 #   đường dẫn trên máy admin (lab_root, lab_out = out/<env>), SSH xuyên jump-01
+│   │   ├── platform.yml              #   đặc thù máy từ plan.yml: card mạng, dhcp/static, NTP (node.*), IP public của biên (public.*)
 │   │   ├── kubernetes.yml            #   dải pod/service, master đầu tiên, namespace PSA restricted, nơi lưu + số bản backup etcd
 │   │   ├── services.yml              #   Harbor (proxy cache), Squid (tên miền được phép), biến proxy, mở egress tạm
 │   │   ├── observability.yml         #   cổng syslog/Wazuh, thời gian giữ log, SMTP + email nhận cảnh báo
 │   │   ├── edge.yml                  #   WAF: mức paranoia, ngưỡng điểm chặn (anomaly)
-│   │   └── secrets.yml               #   MỌI mật khẩu: tự sinh lần đầu vào out/, lần sau đọc lại
+│   │   └── secrets.yml               #   MỌI mật khẩu: tự sinh lần đầu vào out/<env>/, lần sau đọc lại
 │   ├── firewalls.yml                 # 2 OPNsense: gọi API trên máy admin, alias dùng chung, bản ghi DNS nội bộ
 │   ├── linux.yml                     # user SSH (ubuntu) cho mọi VM
 │   └── zone_dmz.yml, zone_lan.yml, zone_mgmt.yml   # zone_fw = firewall làm DNS/NTP của vùng đó

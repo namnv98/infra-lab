@@ -1,7 +1,7 @@
 # QUY HOẠCH MẠNG + MÁY của môi trường GCP — NGUỒN DUY NHẤT của mọi IP.
 # Đổi IP / thêm máy: sửa ở đây, rồi `python3 scripts/plan.py check`, `./lab.sh plan`, chạy Ansible.
 # Ai đọc file này:
-#   tofu/envs/gcp/main.tf (yamldecode)   → VPC, VM, card firewall, alias IP, route
+#   provision/gcp/main.tf (yamldecode)   → BỘ TẠO MÁY (tuỳ chọn): VPC, VM, card firewall, alias IP, route
 #   ansible/inventories/gcp/inventory.py → nhóm máy + ansible_host cho Ansible; biến `plan` cho group_vars
 #   scripts/opnsense-bootstrap.py          → card, gateway, route của 2 firewall
 #   scripts/plan.py (lab.sh, harbor-prewarm.sh) → IP jump, cấu hình VPN
@@ -10,6 +10,12 @@
 platform: gcp          # gcp: VPC (.1 là gateway của GCP, firewall .253) · onprem: VLAN (firewall là gateway)
 domain: lab.internal
 mtu: 1460             # MTU mạng (VPC của GCP: 1460) — card OPNsense, VM, WireGuard (= mtu − 80) đều theo số này
+
+# VM Linux: card mạng chính, cách lấy IP (dhcp: VPC cấp đúng IP trong plan · static: Ansible ghi netplan), dịch vụ NTP của image
+node: { interface: ens4, network: dhcp, ntp: chrony }
+# IP public của firewall biên: web (80/443) + vpn (Endpoint WireGuard). GCP cấp IP lúc tạo → provision/gcp ghi vào
+# envs/gcp/provisioned.yml (không ghi ở đây). Máy dựng tay/nền tảng khác: ghi thẳng dòng dưới.
+# public: { web: 203.0.113.10, vpn: 203.0.113.11 }
 
 # Vùng = VPC. gateway = gateway của VPC (.1); fw = card firewall làm "default gateway" của vùng (route VPC 0/0)
 zones:

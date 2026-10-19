@@ -2,12 +2,13 @@
 
 # Thư mục gốc của lab và out/ (bí mật, kubeconfig, log) — tính từ vị trí inventory, không phụ thuộc playbook
 lab_root: "{{ ansible_config_file | dirname | dirname }}"   # thư mục chứa ansible/ (ansible.cfg) — có cho cả localhost
-lab_env: "{{ plan.platform }}"                     # gcp | onprem (= tên thư mục inventories/<env>)
-lab_out: "{{ lab_root }}/out{{ '' if lab_env == 'gcp' else '/' ~ lab_env }}"   # on-prem tách out/onprem/: không ghi đè bí mật của lab GCP
+# lab_env = tên môi trường (= thư mục inventories/<env>, envs/<env>) — inventory đặt sẵn
+lab_out: "{{ lab_root }}/out/{{ lab_env }}"       # bí mật, kubeconfig, known_hosts của từng môi trường: out/<env>/
 
 # SSH: VPN admin chỉ tới được jump-01 → mọi máy khác đi xuyên qua nó.
-# ProxyCommand (không dùng ProxyJump) để chặng tới jump cũng dùng known_hosts riêng của lab.
+# ProxyCommand (không dùng ProxyJump) để chặng tới jump cũng dùng known_hosts riêng của môi trường.
 ansible_ssh_common_args: >-
+  -o UserKnownHostsFile={{ lab_out }}/known_hosts
   {{ '' if inventory_hostname in groups['bastion'] else
      '-o ProxyCommand="ssh -W %h:%p -q -o BatchMode=yes -o UserKnownHostsFile=' ~ lab_out ~ '/known_hosts'
      ~ ' -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ubuntu@' ~ jump_ip ~ '"' }}

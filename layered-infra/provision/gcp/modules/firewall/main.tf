@@ -35,7 +35,7 @@ resource "google_compute_instance" "fw" {
     # Console nối tiếp: bootstrap lần đầu + cứu hộ (giống IPMI/iLO của máy thật)
     serial-port-enable = "TRUE"
     # config.xml bootstrap (scripts/opnsense-bootstrap.py <vai>): lần boot đầu nạp qua console, giống cắm USB chứa config ở on-prem.
-    # lab.sh up luôn sinh file trước apply; thiếu file (máy mới, out/ trống) thì destroy vẫn chạy được
+    # make fw-config sinh file trước apply; thiếu file (máy mới, out/gcp/ trống) thì destroy vẫn chạy được
     opnsense-config = fileexists("${var.bootstrap_dir}/opnsense-${each.value.role}-bootstrap.xml") ? file("${var.bootstrap_dir}/opnsense-${each.value.role}-bootstrap.xml") : ""
   }
 

@@ -8,7 +8,7 @@ variable "prefix" {
 }
 
 variable "opnsense_image" {
-  description = "Image OPNsense tự đưa lên (./lab.sh image)"
+  description = "Image OPNsense tự đưa lên (provision/gcp/gcp.sh image)"
   type        = string
   default     = "opnsense-26-7-nano"
 }

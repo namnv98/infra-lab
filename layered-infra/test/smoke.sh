@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # Kiểm thử đầu-cuối trên lab ĐANG CHẠY (sau make cluster). Cần VPN bật (make vpn). Không đổi gì trên lab.
+# Giống nhau mọi môi trường (LAB_ENV, mặc định gcp): mọi IP từ envs/<env>/plan.yml, không hỏi bộ tạo máy.
 # Mỗi dòng: tên kiểm thử, mong đợi, thực tế → ĐẠT/LỖI. Thoát mã 1 nếu có kiểm thử lỗi (dùng được trong CI).
 #   ./test/smoke.sh            # chạy hết
 #   ./test/smoke.sh web        # chỉ nhóm có tên chứa "web" (web, vpn, egress, edge, cluster, siem)
 set -uo pipefail
 LAB=$(cd "$(dirname "$0")/.." && pwd); cd "$LAB"
+export LAB_ENV=${LAB_ENV:-gcp}; OUT="out/$LAB_ENV"
 PLAN="python3 -I $LAB/scripts/plan.py get"
 SSH="$LAB/lab.sh ssh"
 FILTER=${1:-}
 
-WEB_IP=$(tofu -chdir=tofu/envs/gcp output -raw fw_public_ip)
+WEB_IP=$($PLAN public_web) || exit 1
 APP="whoami.$($PLAN gw_domain public)"
 JUMP=$($PLAN jump_ip); MASTER=$($PLAN group_ip k8s_control_plane); SIEM=$($PLAN group_ip siem)
 read -r GUI_EDGE GUI_CORE <<<"$($PLAN fw_gui)"; DNS=$($PLAN dns); DOMAIN=$($PLAN domain)
@@ -27,10 +29,10 @@ tcp() { timeout 5 bash -c "</dev/tcp/$1/$2" 2>/dev/null && echo mở || echo ch�
 remote_tcp() { $SSH "$1" "timeout 5 bash -c '</dev/tcp/$2/$3' 2>/dev/null && echo mở || echo chặn" 2>/dev/null | tail -1; }
 kubectl() { $SSH "$MASTER" "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf $*" 2>/dev/null; }
 
-echo "== Kiểm thử đầu-cuối · IP web $WEB_IP"
+echo "== Kiểm thử đầu-cuối · môi trường $LAB_ENV · IP web $WEB_IP"
 
 if want web; then  # Internet → firewall biên → HAProxy + WAF → Gateway → app
-  C=(--resolve "$APP:443:$WEB_IP" --cacert out/lab-ca.crt)
+  C=(--resolve "$APP:443:$WEB_IP" --cacert "$OUT/lab-ca.crt")
   check web "Internet → app qua HTTPS"           200 "$(code "${C[@]}" "https://$APP/")"
   check web "WAF chặn SQL injection"            403 "$(code "${C[@]}" "https://$APP/?id=1%27%20OR%20%271%27=%271")"
   check web "WAF chặn XSS"                      403 "$(code "${C[@]}" "https://$APP/?q=%3Cscript%3Ealert(1)%3C/script%3E")"
@@ -80,14 +82,14 @@ if want prod; then  # chuẩn production (docs/thiet-ke-k8s-production.md)
   check prod "StorageClass mặc định"                    standard "$(kubectl get sc --no-headers | awk '/\(default\)/{print $1}')"
   check prod "HPA whoami đọc được CPU"                  có "$(kubectl -n demo get hpa whoami -o jsonpath='{.status.currentMetrics[0].resource.current.averageUtilization}' | grep -q '[0-9]' && echo có || echo không)"
   check prod "PDB whoami cho phép drain 1 pod"          1 "$(kubectl -n demo get pdb whoami -o jsonpath='{.status.disruptionsAllowed}')"
-  BAD='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"t","namespace":"demo"},"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"c","image":"harbor.lab.internal/dockerhub/library/busybox:latest","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+  BAD='{"apiVersion":"v1","kind":"Pod","metadata":{"name":"t","namespace":"demo"},"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65534,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"c","image":"harbor.'"$DOMAIN"'/dockerhub/library/busybox:latest","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
   check prod "Kyverno chặn image :latest ở app"         chặn "$(OUT=$(echo "$BAD" | $SSH "$MASTER" 'sudo kubectl --kubeconfig /etc/kubernetes/admin.conf apply --dry-run=server -f - 2>&1' 2>/dev/null); [[ $OUT == *cam-tag-latest* ]] && echo chặn || echo cho qua)"
   WORKER=$(kubectl get nodes --no-headers -l '!node-role.kubernetes.io/control-plane' | awk 'NR==1{print $1}')
   WLIM=$(kubectl describe node "$WORKER" | awk '/Allocated resources/{f=1} f && $1=="memory"{gsub(/[()%]/,"",$5); print $5; exit}')
   check prod "Limit RAM worker không vượt RAM thật (≤100%)" có "$([[ ${WLIM:-999} -le 100 ]] && echo có || echo "không (${WLIM}%)")"
   NS_NP=$(kubectl get cnp -A --no-headers | awk '$2=="baseline"' | wc -l)
   check prod "Namespace có NetworkPolicy mặc định chặn"  9 "$NS_NP"
-  BENCH=$(grep -h '^\[FAIL\]' out/kube-bench-*.txt | grep -vE '^\[FAIL\] (1\.1\.12|4\.3\.1) ' | wc -l)
+  BENCH=$(grep -h '^\[FAIL\]' "$OUT"/kube-bench-*.txt | grep -vE '^\[FAIL\] (1\.1\.12|4\.3\.1) ' | wc -l)
   check prod "kube-bench: không FAIL ngoài ngoại lệ"    0 "$BENCH"
 fi
 

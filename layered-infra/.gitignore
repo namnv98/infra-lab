@@ -1,9 +1,12 @@
 # State của OpenTofu chứa thông tin nhạy cảm (IP, tên tài nguyên, đôi khi secret)
-tofu/**/.terraform/
-tofu/**/*.tfstate
-tofu/**/*.tfstate.*
-tofu/**/*.tfplan
+provision/**/.terraform/
+provision/**/*.tfstate
+provision/**/*.tfstate.*
+provision/**/*.tfplan
+# bí mật, kubeconfig, log của từng môi trường (out/<env>/)
 out/
+# IP do bộ tạo máy ghi ra (vd. IP public GCP) — đổi mỗi lần dựng lại
+envs/*/provisioned.yml
 ansible/.ansible/   # cache của ansible-lint/collection
 __pycache__/
 # cấu hình riêng của IDE

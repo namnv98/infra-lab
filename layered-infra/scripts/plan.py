@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Đọc quy hoạch mạng envs/<env>/plan.yml — nguồn duy nhất của mọi IP.
+"""Đọc quy hoạch mạng envs/<env>/plan.yml — nguồn duy nhất của mọi IP, giống nhau mọi môi trường.
+Bộ tạo máy (vd. provision/gcp) chỉ ghi thêm envs/<env>/provisioned.yml (IP do nền tảng cấp, vd. IP public) — gộp đè lên plan.yml.
 
 Dùng như thư viện (opnsense-bootstrap.py) hoặc lệnh cho shell (lab.sh, harbor-prewarm.sh):
   plan.py check                     kiểm tra plan hợp lệ (IP trong dải, không trùng, không dùng IP GCP giữ, số card ≤ vCPU)
@@ -9,20 +10,31 @@ Dùng như thư viện (opnsense-bootstrap.py) hoặc lệnh cho shell (lab.sh, 
   plan.py get dns                   DNS nội bộ cho máy admin (card LAN của core)
   plan.py get group_ip <nhóm>       IP máy đầu tiên của 1 nhóm (vd. infra, k8s_control_plane)
   plan.py get vpn_admin             IP máy admin trong VPN
+  plan.py get vpn_port              cổng WireGuard
+  plan.py get fw_names              tên các firewall
   plan.py get ssh_hosts             "tên IP" từng VM Linux (lab.sh sinh out/ssh_config)
   plan.py get fw_gui                GUI của các firewall (card mặc định của từng vùng có fw), cách nhau bởi dấu cách
+  plan.py get public_web|public_vpn  IP public của firewall biên: web (80/443) · VPN (Endpoint WireGuard)
 Môi trường khác: biến LAB_ENV (mặc định gcp).
 """
 import ipaddress, os, pathlib, sys
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-PLAN = ROOT / "envs" / os.environ.get("LAB_ENV", "gcp") / "plan.yml"
+ENV = os.environ.get("LAB_ENV", "gcp")
+PLAN = ROOT / "envs" / ENV / "plan.yml"
 VCPU = {"e2-micro": 2, "e2-small": 2, "e2-medium": 2, "e2-standard-2": 2, "e2-highcpu-4": 4, "e2-standard-4": 4}
 
 
-def load(path=PLAN):
-    return yaml.safe_load(pathlib.Path(path).read_text())
+def load(env=None):
+    """plan.yml + provisioned.yml (nếu có, khoá cấp 1 gộp đè lên)."""
+    d = ROOT / "envs" / (env or ENV)
+    p = yaml.safe_load((d / "plan.yml").read_text())
+    prov = d / "provisioned.yml"
+    if prov.exists():
+        for k, v in (yaml.safe_load(prov.read_text()) or {}).items():
+            p[k] = {**p.get(k, {}), **v} if isinstance(v, dict) else v
+    return p
 
 
 def host_in_group(p, group):
@@ -57,7 +69,18 @@ def check(p):
             errs.append(f"{who}: {ip} trùng với {seen[ip]}")
         seen[ip] = who
 
-    gcp = p.get("platform", "gcp") == "gcp"
+    node = p.get("node", {})
+    if not node.get("interface"):
+        errs.append("node.interface: thiếu tên card mạng chính của VM Linux (vd. ens4, enp1s0)")
+    if node.get("network") not in ("dhcp", "static"):
+        errs.append("node.network: phải là dhcp hoặc static")
+    if node.get("ntp") not in ("chrony", "systemd-timesyncd"):
+        errs.append("node.ntp: phải là chrony hoặc systemd-timesyncd")
+    for k, ip in p.get("public", {}).items():
+        if k not in ("web", "vpn"):
+            errs.append(f"public.{k}: chỉ có web, vpn")
+        else:
+            ipaddress.ip_address(ip)
     for z, v in p["zones"].items():
         if gcp and ipaddress.ip_address(v["gateway"]) != zones[z].network_address + 1:
             errs.append(f"vùng {z}: gateway {v['gateway']} phải là .1 (GCP)")
@@ -109,6 +132,8 @@ def get(p, key, *args):
         return p["hosts"][host_in_group(p, args[0])[0]]["ip"]
     if key == "ssh_hosts":
         return "\n".join(f"{n} {h['ip']}" for n, h in p["hosts"].items())
+    if key == "fw_names":     # tên 2 firewall (cách nhau dấu cách)
+        return " ".join(p["firewalls"])
     if key == "group_hosts":   # tên các máy trong nhóm (cách nhau dấu cách)
         return " ".join(host_in_group(p, args[0]))
     if key == "start_order":   # thứ tự bật máy, mỗi dòng 1 tầng (tắt: ngược lại) — tầng sau cần tầng trước chạy
@@ -124,8 +149,16 @@ def get(p, key, *args):
         return p["k8s"]["gateways"][args[0]]["domain"]
     if key == "vpn_admin":
         return p["vpn"]["admin"]
+    if key == "vpn_port":
+        return p["vpn"]["port"]
     if key == "fw_gui":   # biên: card DMZ; core: card LAN (theo thứ tự xuất hiện, bỏ trùng)
         return " ".join(dict.fromkeys(p["zones"][z]["fw"] for z in ("dmz", "lan")))
+    if key in ("public_web", "public_vpn"):
+        ip = p.get("public", {}).get(key.split("_")[1])
+        if not ip:
+            sys.exit(f"thiếu public.{key.split('_')[1]} cho môi trường {ENV}: bộ tạo máy (make provision) ghi vào "
+                     f"envs/{ENV}/provisioned.yml, máy có sẵn thì ghi tay public: {{ web: …, vpn: … }} vào envs/{ENV}/plan.yml")
+        return ip
     sys.exit(f"không biết khoá: {key}")
 
 

@@ -2,7 +2,7 @@
 extends: default
 ignore: |
   out/
-  tofu/**/.terraform/
+  provision/**/.terraform/
 rules:
   line-length: disable          # comment giải thích tiếng Việt thường dài
   document-start: disable       # không bắt buộc "---" đầu file

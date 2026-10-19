@@ -1,74 +1,28 @@
-# Bootstrap 2 firewall MỚI TẠO (sau ./lab.sh up). Chỉ chạy MỘT LẦN: site.yml gắn tag [bootstrap, never]
-#   → chỉ chạy khi gọi đích danh:  ansible-playbook site.yml --tags bootstrap,network   (= ./lab.sh fw-bootstrap)
+# Bootstrap 2 firewall MỚI — giống nhau mọi môi trường. Chỉ chạy MỘT LẦN: site.yml gắn tag [bootstrap, never]
+#   → chỉ chạy khi gọi đích danh:  make bootstrap  (= ansible-playbook site.yml --tags bootstrap,network)
+# Điều kiện trước (việc của BƯỚC TẠO MÁY, playbook này không biết máy do ai tạo):
+#   - 2 firewall đã cài OPNsense + nạp config bootstrap out/<env>/opnsense-<edge|core>-bootstrap.xml (make fw-config sinh ra)
+#     GCP: make provision tự làm (metadata + console) · máy dựng tay: chép USB thành /conf/config.xml, hoặc nạp qua console/IPMI
+#   - IP public của biên có trong plan: public.web, public.vpn (plan.yml hoặc provisioned.yml)
 # Chạy lại trên firewall đã cấu hình sẽ lỗi: luật BOOTSTRAP (API qua IP public) đã bị xoá ở bước network.
-#   ① nạp config bootstrap — GCP: console nối tiếp (2 firewall song song) · on-prem: sinh config, chép USB, cắm vào firewall
-#   → ② biên: API qua IP public, dựng VPN
-#   → ③ máy admin bật VPN → ④ chờ API core xuyên VPN → (tag network) cấu hình đầy đủ cả hai, xoá luật BOOTSTRAP
+#   ① chờ API biên qua IP public → ② biên dựng VPN → ③ máy admin bật VPN → ④ chờ API core xuyên VPN
+#   → (tag network) cấu hình đủ cả hai, xoá luật BOOTSTRAP
 
-- name: "① Nạp config bootstrap cho 2 firewall"
+- name: "① Chờ API firewall biên trên IP public"
   hosts: localhost
   connection: local
   gather_facts: false
   tasks:
-    # ---------- on-prem: config ra USB (importer của OPNsense nạp /conf/config.xml từ USB lúc khởi động) ----------
-    - name: "On-prem: khoá WireGuard của máy admin (giữ nếu đã có)"
-      ansible.builtin.shell: |
-        set -e; umask 077; mkdir -p {{ lab_out }}
-        [ -s {{ lab_out }}/wg-admin.key ] || wg genkey > {{ lab_out }}/wg-admin.key
-        wg pubkey < {{ lab_out }}/wg-admin.key > {{ lab_out }}/wg-admin.pub
-      args: { creates: "{{ lab_out }}/wg-admin.pub" }
-      when: lab_env != 'gcp'
+    - name: Plan có IP public của biên và config bootstrap đã sinh
+      ansible.builtin.assert:
+        that:
+          - plan.public.web is defined and plan.public.vpn is defined
+          - (lab_out ~ '/opnsense-edge-api.txt') is file
+        fail_msg: >-
+          Thiếu public.web/public.vpn (bộ tạo máy ghi envs/{{ lab_env }}/provisioned.yml, máy có sẵn thì ghi tay vào plan.yml)
+          hoặc chưa chạy make fw-config ENV={{ lab_env }}
 
-    - name: "On-prem: config mặc định của đúng phiên bản OPNsense"
-      ansible.builtin.get_url:
-        url: https://raw.githubusercontent.com/opnsense/core/26.7/src/etc/config.xml.sample
-        dest: "{{ lab_out }}/factory-config-26.7.xml"
-        mode: "0644"
-      when: lab_env != 'gcp'
-
-    - name: "On-prem: sinh config bootstrap cho 2 firewall ({{ lab_out }})"
-      ansible.builtin.command: >-
-        python3 -I {{ lab_root }}/scripts/opnsense-bootstrap.py {{ lab_out }}/factory-config-26.7.xml {{ lab_out }}
-        {{ admin_public_ip | default(lookup('ansible.builtin.url', 'https://api.ipify.org')) }} {{ item.value.role }}
-      environment: { LAB_ENV: "{{ lab_env }}" }
-      loop: "{{ plan.firewalls | dict2items }}"
-      loop_control: { label: "{{ item.key }}" }
-      when: lab_env != 'gcp'
-      changed_when: true
-
-    - name: "On-prem: chép config vào USB, cắm vào firewall"
-      ansible.builtin.pause:
-        prompt: |-
-          Với từng firewall: chép {{ lab_out }}/opnsense-<edge|core>-bootstrap.xml vào USB thành /conf/config.xml,
-          cắm vào firewall, khởi động lại (OPNsense hỏi nạp config từ USB → đồng ý; hoặc qua IPMI/iLO: menu "Import configuration").
-          Cắm cáp: biên WAN → nhà mạng, transit ↔ core; switch đã tạo VLAN theo plan.yml. Xong cả hai thì nhấn Enter
-      when: lab_env != 'gcp'
-
-    # ---------- GCP: console nối tiếp + metadata ----------
-    - name: Mở console, đăng nhập mặc định, tải config từ metadata, khởi động lại (song song)
-      # tải config từ metadata qua card vtnet1 (card thứ 2 trong plan.yml) → cần gateway VPC của vùng card đó
-      ansible.builtin.command: >-
-        python3 -I {{ lab_root }}/scripts/fw-console-bootstrap.py {{ item.key }} {{ gcp_zone }} {{ gcp_project }}
-        {{ plan.zones[item.value.nics[1].zone].gateway }}
-      loop: "{{ plan.firewalls | dict2items }}"
-      loop_control: { label: "{{ item.key }}" }
-      async: 1200
-      poll: 0
-      register: console_jobs
-      changed_when: true
-      when: lab_env == 'gcp'
-
-    - name: Chờ console xong
-      ansible.builtin.async_status: { jid: "{{ item.ansible_job_id }}" }
-      loop: "{{ console_jobs.results | default([]) }}"
-      loop_control: { label: "{{ item.item.key }}" }
-      register: console_done
-      until: console_done.finished
-      when: lab_env == 'gcp'
-      retries: 120
-      delay: 10
-
-    - name: Chờ API firewall biên trên IP public
+    - name: Chờ API firewall biên (https://{{ fw_public_ip }}) — firewall đã nạp config bootstrap chưa?
       ansible.builtin.uri:
         url: "https://{{ fw_public_ip }}/api/core/firmware/status"
         user: "{{ lookup('ansible.builtin.ini', 'key', file=lab_out ~ '/opnsense-edge-api.txt', type='properties') }}"
@@ -95,32 +49,10 @@
   connection: local
   gather_facts: false
   tasks:
-    - name: Bật VPN (NetworkManager, Endpoint = IP VPN)
+    - name: Bật VPN trên máy admin (NetworkManager, Endpoint = IP VPN)
       ansible.builtin.command: "{{ lab_root }}/lab.sh vpn up"
+      environment: { LAB_ENV: "{{ lab_env }}" }
       changed_when: true
-      when: lab_env == 'gcp'
-
-    - name: "On-prem: file WireGuard cho máy admin"
-      ansible.builtin.copy:
-        dest: "{{ lab_out }}/wg-admin.conf"
-        mode: "0600"
-        content: |
-          [Interface]
-          PrivateKey = {{ lookup('ansible.builtin.file', lab_out ~ '/wg-admin.key') }}
-          Address = {{ plan.vpn.admin }}/32
-          DNS = {{ lan_fw }}
-
-          [Peer]
-          PublicKey = {{ lookup('ansible.builtin.file', lab_out ~ '/wg-server.pub') }}
-          Endpoint = {{ fw_public_ip }}:{{ plan.vpn.port }}
-          AllowedIPs = {{ lookup('ansible.builtin.pipe', 'LAB_ENV=' ~ lab_env ~ ' python3 -I ' ~ lab_root ~ '/scripts/plan.py get vpn_allowed_ips') }}
-          PersistentKeepalive = 25
-      when: lab_env != 'gcp'
-
-    - name: "On-prem: bật VPN trên máy admin"
-      ansible.builtin.pause:
-        prompt: "Nhập {{ lab_out }}/wg-admin.conf vào WireGuard (vd. nmcli connection import type wireguard file …), bật lên rồi nhấn Enter"
-      when: lab_env != 'gcp'
 
     - name: Chờ API firewall core (card LAN, qua biên)
       ansible.builtin.uri:

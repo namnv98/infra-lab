@@ -1,12 +1,13 @@
-# Môi trường GCP: lab on-prem dựng trên GCP — chỉ dùng thứ GCP bắt buộc (VPC, route, VM, đĩa, IP public).
-# Firewall/NAT/DNS/VPN = OPNsense; cửa vào = HAProxy ở DMZ; registry, proxy, SIEM tự host.
-# Quy hoạch mạng + máy: NGUỒN DUY NHẤT envs/gcp/plan.yml (Ansible đọc cùng file).
+# BỘ TẠO MÁY cho GCP (tuỳ chọn, xoá cả provision/gcp/ được): chỉ dựng thứ GCP bắt buộc (VPC, route, VM, đĩa, IP public).
+# Đầu vào: envs/gcp/plan.yml + out/gcp/opnsense-<vai>-bootstrap.xml (make fw-config).
+# Đầu ra cho lớp cấu hình: máy chạy đúng IP trong plan + envs/gcp/provisioned.yml (IP public, gcp.sh ghi sau apply).
 # File này chỉ đổi plan → tham số cho 3 module: network (VPC), firewall (OPNsense, IP public, route), vm (Linux).
 locals {
-  lab  = "${path.root}/../../.."
+  lab  = "${path.root}/../.."
   plan = yamldecode(file("${local.lab}/envs/gcp/plan.yml"))
 
   zones = { for k, v in local.plan.zones : k => { cidr = v.cidr } }
+  mtu   = try(local.plan.mtu, 1460)
 
   firewalls = { for k, f in local.plan.firewalls : k => {
     role = f.role, type = f.type, nics = [for n in f.nics : { zone = n.zone, ip = n.ip }]
@@ -41,15 +42,16 @@ resource "google_project_service" "api" {
 }
 
 module "network" {
-  source     = "../../modules/network"
+  source     = "./modules/network"
   prefix     = var.prefix
   region     = var.region
   zones      = local.zones
+  mtu        = local.mtu
   depends_on = [google_project_service.api]
 }
 
 module "firewall" {
-  source                = "../../modules/firewall"
+  source                = "./modules/firewall"
   prefix                = var.prefix
   region                = var.region
   zone                  = var.zone
@@ -58,7 +60,7 @@ module "firewall" {
   edge                  = one([for k, f in local.firewalls : k if f.role == "edge"])
   routes                = local.routes
   vpn_port              = local.plan.vpn.port
-  bootstrap_dir         = "${local.lab}/out"
+  bootstrap_dir         = "${local.lab}/out/gcp"
   network_ids           = module.network.network_ids
   wan_network_self_link = module.network.network_self_links["wan"]
   subnet_ids            = module.network.subnet_ids
@@ -66,7 +68,7 @@ module "firewall" {
 }
 
 module "vm" {
-  source     = "../../modules/vm"
+  source     = "./modules/vm"
   zone       = var.zone
   vms        = local.vms
   subnet_ids = module.network.subnet_ids

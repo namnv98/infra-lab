@@ -3,7 +3,7 @@ resource "google_compute_network" "zone" {
   for_each                = var.zones
   name                    = "${var.prefix}-${each.key}"
   auto_create_subnetworks = false
-  mtu                     = 1460
+  mtu                     = var.mtu
   # Vùng bên trong không có đường ra Internet của GCP: mọi traffic ra ngoài phải qua OPNsense
   delete_default_routes_on_create = each.key != "wan"
 }

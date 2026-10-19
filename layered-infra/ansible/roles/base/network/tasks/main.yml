@@ -21,7 +21,7 @@
   ansible.builtin.command: netplan apply
   when: np is changed or np_old is changed
 
-# NTP lấy từ OPNsense của vùng. GCP: image dùng chrony · Ubuntu cài thường: systemd-timesyncd (ntp_client trong platform.yml)
+# NTP lấy từ OPNsense của vùng. GCP: image dùng chrony · Ubuntu cài thường: systemd-timesyncd (node.ntp trong plan.yml)
 - name: NTP lấy từ OPNsense (chrony), bỏ NTP metadata của Google
   when: ntp_client == 'chrony'
   ansible.builtin.copy:

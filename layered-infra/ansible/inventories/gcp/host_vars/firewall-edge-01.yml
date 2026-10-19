@@ -4,8 +4,7 @@ opn_role: edge
 opnsense_url: "https://{{ plan.zones.dmz.fw }}"   # qua VPN (00-firewall-bootstrap.yml thay bằng IP public lúc dựng)
 opnsense_api_file: "{{ lab_out }}/opnsense-edge-api.txt"
 
-# IP VPN riêng: đọc từ tofu, không ghi cứng (đổi mỗi lần dựng lại)
-vpn_public_ip: "{{ lookup('ansible.builtin.pipe', 'tofu -chdir=' ~ tofu_dir ~ ' output -raw vpn_public_ip') }}"
+# IP VPN riêng (vpn_public_ip = plan.public.vpn, group_vars/all/platform.yml): protocol forwarding giữ nguyên IP đích → VIP trên WAN
 opn_aliases_host:
   - { name: vpn_public_ip, type: host, content: "{{ vpn_public_ip }}", description: "IP VPN (protocol forwarding của GCP → WAN)" }
 opn_vips:

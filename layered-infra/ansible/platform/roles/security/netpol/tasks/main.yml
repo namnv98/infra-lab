@@ -13,10 +13,31 @@
   loop_control: { label: "{{ item.key }}" }
   when: not netpol_only or item.key in netpol_only
 
+# Áp bằng merge: khoá cấp trên đã có không bị xoá → đổi deny_all ↔ mở sẽ sót ingressDeny/egressDeny cũ (deny thắng allow).
+# CRD không cho replace thiếu resourceVersion → khi chế độ đổi thì xoá policy cũ trước rồi tạo lại.
+- name: Policy "baseline" đang có
+  kubernetes.core.k8s_info:
+    api_version: cilium.io/v2
+    kind: CiliumNetworkPolicy
+    field_selectors: [metadata.name=baseline]
+  register: netpol_existing
+
+- name: Xoá "baseline" cũ khác chế độ (deny_all ↔ mở)
+  kubernetes.core.k8s:
+    state: absent
+    api_version: cilium.io/v2
+    kind: CiliumNetworkPolicy
+    namespace: "{{ item.metadata.namespace }}"
+    name: baseline
+  loop: "{{ netpol_existing.resources }}"
+  loop_control: { label: "{{ item.metadata.namespace }}" }
+  when:
+    - item.metadata.namespace in netpol_namespaces
+    - ('ingressDeny' in item.spec) != (netpol_namespaces[item.metadata.namespace].deny_all | default(false))
+
 - name: Mặc định chặn cho các namespace còn lại (CiliumNetworkPolicy "baseline")
   kubernetes.core.k8s:
     template: baseline-netpol.yaml.j2
-    force: true   # thay cả object: merge thì đổi deny_all → mở sẽ còn sót egressDeny/ingressDeny cũ (deny thắng allow)
   vars: { netpol_ns: "{{ item.key }}", netpol_cfg: "{{ item.value }}" }   # tên riêng: biến register "cfg" của role khác được ưu tiên hơn biến task
   loop: "{{ netpol_namespaces | dict2items }}"
   loop_control: { label: "{{ item.key }}" }

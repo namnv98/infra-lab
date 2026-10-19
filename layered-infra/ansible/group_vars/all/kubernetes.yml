@@ -1,7 +1,0 @@
-# Cluster: dải mạng, master đầu tiên, chính sách bảo mật, backup etcd
-pod_cidr: 10.244.0.0/16
-service_cidr: 10.96.0.0/12
-first_cp: "{{ groups['k8s_control_plane'][0] }}"   # master khởi tạo cluster, các master khác join vào
-psa_restricted_namespaces: [default, demo, gateway, cert-manager]   # chỉ cho chạy Pod đạt chuẩn "restricted"
-etcd_backup_dir: /var/backups/etcd
-etcd_backup_keep: 7                    # giữ 7 bản gần nhất

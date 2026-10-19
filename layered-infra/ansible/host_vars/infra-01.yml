@@ -1,7 +1,0 @@
-# Log ứng dụng rsyslog đọc thêm trên infra-01
-log_files:
-  - { path: /var/log/squid/access.log, tag: squid }
-audit_service_users: [proxy]      # Squid chạy dưới user proxy
-
-# infra-01 chính là máy được ra Internet
-egress_env: {}

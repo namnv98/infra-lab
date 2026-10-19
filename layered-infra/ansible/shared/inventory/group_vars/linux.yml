@@ -1,0 +1,2 @@
+# Mọi VM Linux: user Ansible SSH vào (sudo không hỏi mật khẩu) → cả 3 team
+ansible_user: ubuntu

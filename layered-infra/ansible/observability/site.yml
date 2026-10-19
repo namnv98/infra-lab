@@ -1,0 +1,30 @@
+# Team OBSERVABILITY: SIEM trên siem-01 (Loki, Alloy, Grafana, Mailpit, Wazuh), bản sao log trên infra-01,
+#   agent thu log/audit/Wazuh trên MỌI máy Linux (ngoại lệ có chủ đích: agent cài khắp nơi, chỉ đụng file của chính nó).
+# Chỉ đọc shared/ (inventory hosts.yml + hợp đồng). Firewall tự gửi syslog về mon_ip:mon_syslog_port (network cấu hình).
+# Metric trong cluster (Prometheus) là của platform. lab.sh chạy file này song song với platform "--tags security,metrics".
+- name: Bản sao log trên infra-01 (phải có trước khi Alloy ghi song song)
+  hosts: infra
+  become: true
+  roles: [loki_replica]
+
+- name: siem-01 (VLAN MGMT) chạy Loki + Alloy + Grafana + Mailpit
+  hosts: siem
+  become: true
+  roles: [siem]
+
+- name: Mọi máy Linux gửi log về siem-01 bằng rsyslog
+  hosts: linux
+  become: true
+  roles: [log_forwarder]
+
+- name: auditd trên mọi máy Linux (danh tính, persistence, user dịch vụ chạy lệnh)
+  hosts: linux
+  become: true
+  environment: "{{ egress_env }}"
+  roles: [auditd, quiet_os]
+
+- name: Wazuh agent trên mọi máy Linux (gửi về manager trên siem-01)
+  hosts: linux:!siem
+  become: true
+  environment: "{{ egress_env }}"
+  roles: [wazuh_agent]

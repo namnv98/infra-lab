@@ -1,1 +1,0 @@
-zone_fw: "{{ plan.zones.lan.fw }}"     # firewall làm gateway của vùng LAN (plan.yml): DNS, NTP

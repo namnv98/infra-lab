@@ -1,6 +1,6 @@
 # ansible-lint cho dự án: bỏ các luật thuần phong cách không hợp quy ước (tên task tiếng Việt, comment dài, biến role không tiền tố)
 profile: basic
-exclude_paths: [_dump_vars.yml, roles/*/*/files/]
+exclude_paths: ["*/roles/*/files/", "*/roles/*/*/files/"]
 skip_list:
   - var-naming[no-role-prefix]   # biến dùng chung giữa role (lab_domain, egress_env…) — đổi tên hàng loạt không đáng
   - yaml[line-length]            # comment giải thích bằng tiếng Việt thường dài
@@ -8,7 +8,7 @@ skip_list:
   - name[template]               # cho phép {{ biến }} giữa tên task
   - yaml[commas]                 # cố ý thêm dấu cách cho bảng luật/alias thẳng cột
   - yaml[colons]
-  - role-name[path]              # role gom theo tầng: roles/<tầng>/<tên>, gọi bằng k8s/cilium
+  - role-name[path]              # platform gom role theo tầng: platform/roles/<tầng>/<tên>, gọi bằng k8s/cilium
 warn_list:
   - command-instead-of-module    # vài chỗ cố ý dùng lệnh (kubectl, docker exec) — xem từng chỗ
   - command-instead-of-shell

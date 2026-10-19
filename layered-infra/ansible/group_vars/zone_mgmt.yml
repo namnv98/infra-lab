@@ -1,1 +1,0 @@
-zone_fw: "{{ plan.zones.mgmt.fw }}"     # firewall làm gateway của vùng MGMT (plan.yml): DNS, NTP

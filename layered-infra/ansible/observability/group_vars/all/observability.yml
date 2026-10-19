@@ -1,0 +1,10 @@
+# SIEM trên siem-01: thu log tập trung, cảnh báo, Wazuh
+# Cổng syslog + Wazuh (mon_syslog_port, wazuh_enroll_port, wazuh_agent_port): shared/inventory/group_vars/all/contract.yml — network mở luật theo đó
+log_retention: 720h                    # Loki trên siem-01: 30 ngày
+log_archive_retention: 2160h           # Loki bản sao trên infra-01: 90 ngày
+
+# Email cảnh báo. Mặc định: Mailpit trên siem-01 (bắt mọi email, xem ở http://mon.lab.internal:8025).
+# Gửi ra hộp thư thật: đổi smtp_host sang SMTP thật (vd. smtp.gmail.com:587), user/password đặt ở secrets.yml.
+smtp_host: "mailpit:1025"
+smtp_from: "grafana-siem@lab.internal"
+alert_email_to: "soc@lab.internal"

@@ -1,0 +1,46 @@
+# firewall-edge-01: firewall BIÊN. Card: wan (IP public), lan = DMZ, wireguard (VPN).
+# Chỉ biên đối mặt Internet: NAT ra ngoài, port forward 80/443 → edge-01, VPN. Lọc vào trong là việc của core.
+opn_role: edge
+opnsense_url: "https://{{ zones.dmz.fw }}"   # qua VPN (00-firewall-bootstrap.yml thay bằng IP public lúc dựng)
+opnsense_api_file: "{{ lab_out }}/opnsense-edge-api.txt"
+
+# IP VPN riêng (vpn_public_ip = vpn_public_ip, network/group_vars/all/network.yml): protocol forwarding giữ nguyên IP đích → VIP trên WAN
+opn_aliases_host:
+  - { name: vpn_public_ip, type: host, content: "{{ vpn_public_ip }}", description: "IP VPN (protocol forwarding của GCP → WAN)" }
+opn_vips:
+  - { interface: wan, network: "{{ vpn_public_ip }}/32", descr: "IP VPN (protocol forwarding)" }
+
+# Lúc bootstrap (00-firewall-bootstrap.yml qua WAN): chỉ dựng VPN + các luật VPN
+opn_bootstrap_rules: ["Internet → WireGuard (IP VPN)", "VPN admin → jump server (SSH)", "VPN admin → ping jump server",
+                      "VPN admin → DNS nội bộ (core)", "VPN admin → GUI/API firewall core", "VPN admin → GUI/API firewall biên"]
+
+opn_rules:
+  # --- WAN ---
+  - { sequence: "5",   interface: wan, action: pass, protocol: UDP, source_net: any, destination_net: vpn_public_ip, destination_port: "{{ wg_port }}", description: "Internet → WireGuard (IP VPN)" }
+  # --- VPN quản trị: chỉ tới jump-01 và GUI/API 2 firewall; mọi máy khác đi qua jump-01 ---
+  - { sequence: "300", interface: wireguard, action: pass,  protocol: TCP,     source_net: admin_hosts, destination_net: jump_host,   destination_port: "22",  description: "VPN admin → jump server (SSH)" }
+  - { sequence: "301", interface: wireguard, action: pass,  protocol: ICMP,    source_net: admin_hosts, destination_net: jump_host,                           description: "VPN admin → ping jump server" }
+  - { sequence: "302", interface: wireguard, action: pass,  protocol: TCP/UDP, source_net: admin_hosts, destination_net: fw_core_lan, destination_port: "53",  description: "VPN admin → DNS nội bộ (core)" }
+  - { sequence: "303", interface: wireguard, action: pass,  protocol: TCP,     source_net: admin_hosts, destination_net: fw_core_lan, destination_port: "443", description: "VPN admin → GUI/API firewall core" }
+  - { sequence: "304", interface: wireguard, action: pass,  protocol: TCP,     source_net: admin_hosts, destination_net: fw_edge_dmz, destination_port: "443", description: "VPN admin → GUI/API firewall biên" }
+  - { sequence: "309", interface: wireguard, action: block, protocol: any,     source_net: any,         destination_net: any, log: "1",                        description: "VPN → còn lại: CHẶN (ghi log)" }
+  # --- DMZ ("lan" của biên): nguồn ghi đích danh; vào trong (10.20, 10.40) VPC đưa thẳng sang core, không qua đây ---
+  - { sequence: "10", interface: lan, action: pass,  protocol: TCP,     source_net: haproxy_dmz, destination_net: RFC1918, destination_not: "1", destination_port: web_ports, description: "edge-01 → Internet 80/443 (apt, Docker Hub)" }
+  - { sequence: "11", interface: lan, action: pass,  protocol: TCP/UDP, source_net: dmz_clients, destination_net: fw_edge_dmz, destination_port: "53",  description: "DMZ → DNS của firewall biên" }
+  - { sequence: "12", interface: lan, action: pass,  protocol: UDP,     source_net: dmz_clients, destination_net: fw_edge_dmz, destination_port: "123", description: "DMZ → NTP của firewall biên" }
+  - { sequence: "20", interface: lan, action: pass,  protocol: TCP,     source_net: svc_hosts,   destination_net: RFC1918, destination_not: "1", destination_port: web_ports, description: "infra-01 → Internet 80/443 (đã qua core)" }
+  - { sequence: "19", interface: lan, action: pass,  protocol: TCP,     source_net: "{{ zones.lan.cidr }}", destination_net: RFC1918, destination_not: "1", destination_port: web_ports, description: "TẠM: LAN (qua core) → Internet 80/443", enabled: "{{ '1' if egress_temp_open else '0' }}" }
+  - { sequence: "21", interface: lan, action: pass,  protocol: TCP,     source_net: fw_core_dmz, destination_net: RFC1918, destination_not: "1", destination_port: web_ports, description: "firewall core → Internet 80/443 (cập nhật)" }
+  - { sequence: "22", interface: lan, action: pass,  protocol: TCP/UDP, source_net: fw_core_dmz, destination_net: RFC1918, destination_not: "1", destination_port: "53",  description: "firewall core → DNS Internet (Unbound đệ quy)" }
+  - { sequence: "23", interface: lan, action: pass,  protocol: UDP,     source_net: fw_core_dmz, destination_net: RFC1918, destination_not: "1", destination_port: "123", description: "firewall core → NTP Internet" }
+  - { sequence: "30", interface: lan, action: pass,  protocol: TCP,     source_net: jump_host,   destination_net: fw_edge_dmz, destination_port: admin_ports, description: "jump-01 → quản trị firewall biên" }
+  - { sequence: "39", interface: lan, action: block, protocol: any,     source_net: any,         destination_net: any, log: "1",                                description: "DMZ → còn lại: CHẶN (ghi log)" }
+
+# Luật mặc định của hãng: "allow LAN to any" ở biên = cho DMZ đi mọi nơi → tắt
+opn_disabled_rules: ["Default allow LAN to any rule", "Default allow LAN IPv6 to any rule"]
+
+# Source NAT (chế độ hybrid): NAT tự động chỉ gồm mạng nối trực tiếp (DMZ). LAN/MGMT tới biên qua core (route tĩnh,
+# core không NAT) → phải khai báo thêm, không thì gói ra WAN mang IP 10.20.x và GCP vứt bỏ.
+opn_snat_rules:
+  - { source_net: "{{ zones.lan.cidr }}", description: "NAT: LAN (qua core) → Internet" }
+  - { source_net: "{{ zones.mgmt.cidr }}", description: "NAT: MGMT (qua core) → Internet" }

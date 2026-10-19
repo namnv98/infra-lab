@@ -19,4 +19,4 @@ variable "ssh_pubkey_file" {
   default     = "~/.ssh/id_ed25519.pub"
 }
 
-# Vùng, firewall, VM, route: KHÔNG khai báo ở đây — đọc từ envs/gcp/plan.yml (main.tf, locals)
+# Vùng, firewall, VM, route: KHÔNG khai báo ở đây — đọc từ ansible/shared/inventory/hosts.yml (main.tf, locals)

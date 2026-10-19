@@ -1,0 +1,73 @@
+# Cluster kubeadm: chuẩn bị node, init/join control plane (kube-vip, Cilium), join worker, kiểm tra.
+- name: Chuẩn bị mọi node (kernel, containerd, kubeadm)
+  hosts: k8s
+  become: true
+  environment: "{{ egress_env }}"
+  roles: [k8s/node_prep, k8s/containerd]
+
+- name: Control plane HA (k8s-master-01 init, rồi lần lượt từng master join để etcd luôn giữ quorum)
+  hosts: k8s_control_plane
+  become: true
+  serial: 1
+  environment: "{{ egress_env }}"
+  roles:
+    - k8s/control_plane
+    - { role: k8s/cilium, when: inventory_hostname == first_cp }
+
+- name: Join worker vào cluster
+  hosts: k8s_workers
+  become: true
+  roles: [k8s/worker]
+
+- name: Kiểm tra cluster
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  tasks:
+    - name: Chờ Cilium chạy ổn trên mọi node
+      ansible.builtin.command: cilium status --wait --wait-duration 5m
+      environment: { KUBECONFIG: /etc/kubernetes/admin.conf }
+      changed_when: false
+
+    - name: Chờ mọi node Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready node --all --timeout=300s
+      environment: { KUBECONFIG: /etc/kubernetes/admin.conf }
+      changed_when: false
+
+    - name: Lấy danh sách node
+      ansible.builtin.command: kubectl get nodes -o wide
+      environment: { KUBECONFIG: /etc/kubernetes/admin.conf }
+      register: nodes
+      changed_when: false
+
+    - name: In danh sách node
+      ansible.builtin.debug: { msg: "{{ nodes.stdout_lines }}" }
+
+# CoreDNS chỉ đọc DNS upstream (resolv.conf của node) lúc khởi động. Network đổi DNS/NTP của VM (network/10-firewall.yml)
+# mà không đụng vào cluster → ở đây so dấu vân tay resolv.conf của mọi node với annotation trên CoreDNS, khác thì
+# cập nhật annotation = rollout lại CoreDNS. Chạy lẻ sau khi network đổi DNS: --tags coredns
+- name: CoreDNS đọc lại DNS upstream khi DNS của node đổi
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  tags: [coredns]
+  environment: { KUBECONFIG: /etc/kubernetes/admin.conf }
+  tasks:
+    - name: DNS upstream của từng node (kubelet đưa file này vào pod CoreDNS)
+      ansible.builtin.slurp: { src: /run/systemd/resolve/resolv.conf }
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['k8s'] }}"
+      register: node_resolv
+
+    - name: Dấu vân tay DNS upstream CoreDNS đang chạy
+      ansible.builtin.command: kubectl -n kube-system get deploy coredns -o jsonpath={.spec.template.metadata.annotations.lab-upstream-dns}
+      register: coredns_dns
+      changed_when: false
+
+    - name: Rollout lại CoreDNS với DNS upstream mới
+      vars:
+        dns_sum: "{{ node_resolv.results | map(attribute='content') | join('') | hash('sha1') }}"
+      ansible.builtin.shell: |
+        kubectl -n kube-system patch deploy coredns --type merge \
+          -p '{"spec":{"template":{"metadata":{"annotations":{"lab-upstream-dns":"{{ dns_sum }}"}}}}}'
+        kubectl -n kube-system rollout status deploy/coredns --timeout=120s
+      when: coredns_dns.stdout != dns_sum
+      changed_when: true

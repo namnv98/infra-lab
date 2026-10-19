@@ -1,0 +1,12 @@
+# infra-01 (LAN, máy dịch vụ: Harbor + S3 của platform, Squid của network, Loki bản sao của observability)
+# — sự thật về máy này mà team KHÁC cần biết.
+
+# → observability (rsyslog): log ứng dụng đọc thêm, gửi về SIEM
+log_files:
+  - { path: /var/log/squid/access.log, tag: squid }
+
+# → observability (auditd): user dịch vụ trên máy (Squid chạy dưới user proxy)
+audit_service_users: [proxy]
+
+# → platform, observability: máy này chính là máy được ra thẳng Internet, không đi qua Squid
+egress_env: {}

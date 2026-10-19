@@ -1,0 +1,13 @@
+# Ansible chạy ở đâu và SSH tới máy thế nào — mọi team.
+
+# Thư mục trên máy admin
+lab_root: "{{ ansible_config_file | dirname | dirname }}"   # gốc dự án (thư mục chứa ansible/)
+lab_out: "{{ lab_root }}/out"                               # bí mật, kubeconfig, known_hosts, log (không commit)
+
+# SSH: VPN admin chỉ tới được jump-01 → mọi máy khác đi xuyên qua nó.
+# ProxyCommand (không dùng ProxyJump) để chặng tới jump cũng dùng known_hosts riêng của lab.
+ansible_ssh_common_args: >-
+  -o UserKnownHostsFile={{ lab_out }}/known_hosts
+  {{ '' if inventory_hostname in groups['bastion'] else
+     '-o ProxyCommand="ssh -W %h:%p -q -o BatchMode=yes -o UserKnownHostsFile=' ~ lab_out ~ '/known_hosts'
+     ~ ' -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4 ubuntu@' ~ jump_ip ~ '"' }}

@@ -6,12 +6,12 @@
 #   scripts/harbor-prewarm.sh img1 img2  # hoặc chỉ định
 set -uo pipefail
 LAB=$(cd "$(dirname "$0")/.." && pwd)
-PLAN="python3 -I $LAB/scripts/plan.py get"   # IP từ envs/<env>/plan.yml (LAB_ENV, mặc định gcp)
-OUT="$LAB/out/${LAB_ENV:-gcp}"
-SVC=ubuntu@$($PLAN group_ip infra)
-CP=ubuntu@$($PLAN group_ip k8s_control_plane)
-JUMP=ubuntu@$($PLAN jump_ip)
-HARBOR=harbor.$($PLAN domain)
+INV="python3 -I $LAB/scripts/inventory.py get"   # IP từ ansible/shared/inventory/hosts.yml
+OUT="$LAB/out"
+SVC=ubuntu@$($INV group_ip infra)
+CP=ubuntu@$($INV group_ip k8s_control_plane)
+JUMP=ubuntu@$($INV jump_ip)
+HARBOR=harbor.$($INV domain)
 # máy admin chỉ SSH được tới jump server → đi xuyên qua nó (known_hosts riêng của lab cho cả 2 chặng)
 KH="-o BatchMode=yes -o UserKnownHostsFile=$OUT/known_hosts -o StrictHostKeyChecking=accept-new"
 rssh() { local h=$1; shift; ssh $KH -o ProxyCommand="ssh -W %h:%p -q $KH $JUMP" "$h" "$@"; }

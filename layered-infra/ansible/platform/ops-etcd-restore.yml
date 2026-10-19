@@ -1,0 +1,70 @@
+# KHÔI PHỤC etcd từ snapshot. THAO TÁC PHÁ HUỶ: mọi thay đổi sau thời điểm snapshot sẽ mất.
+#   ansible-playbook platform/ops-etcd-restore.yml                          # dùng bản mới nhất trên k8s-master-01
+#   ansible-playbook platform/ops-etcd-restore.yml -e etcd_snapshot=/var/backups/etcd/etcd-k8s-master-01-....db
+# Chỉ dùng cho cluster 1 control-plane. Với 3 master phải restore cả 3 cùng một snapshot.
+- name: Restore etcd
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  vars:
+    stopped_dir: /etc/kubernetes/manifests-stopped
+  tasks:
+    - name: Chỉ hỗ trợ 1 control-plane
+      ansible.builtin.assert:
+        that: groups['k8s_control_plane'] | length == 1
+        fail_msg: "Cluster có nhiều master: phải restore đồng thời trên tất cả, playbook này không làm việc đó"
+
+    - name: Chọn snapshot mới nhất
+      ansible.builtin.shell: ls -1t {{ etcd_backup_dir }}/etcd-*.db | head -1
+      register: latest
+      changed_when: false
+      when: etcd_snapshot is not defined
+
+    - name: Snapshot sẽ dùng
+      ansible.builtin.set_fact:
+        snap: "{{ etcd_snapshot | default(latest.stdout) }}"
+
+    - name: Kiểm tra snapshot hợp lệ
+      ansible.builtin.command: etcdutl snapshot status {{ snap }} -w table
+      changed_when: false
+
+    - name: Dừng kube-apiserver và etcd (rút static pod manifest ra, kubelet sẽ tự dừng pod)
+      ansible.builtin.shell: |
+        mkdir -p {{ stopped_dir }}
+        mv /etc/kubernetes/manifests/kube-apiserver.yaml /etc/kubernetes/manifests/etcd.yaml {{ stopped_dir }}/
+
+    - name: Chờ etcd dừng hẳn
+      ansible.builtin.shell: crictl ps --name '^etcd$' -q
+      register: etcd_ps
+      until: etcd_ps.stdout == ""
+      retries: 30
+      delay: 2
+      changed_when: false
+
+    # --bump-revision + --mark-compacted: tránh watch cache của apiserver/controller dùng revision cũ hơn
+    - name: Restore snapshot ra thư mục dữ liệu mới
+      ansible.builtin.shell: |
+        rm -rf /var/lib/etcd-restore
+        etcdutl snapshot restore {{ snap }} \
+          --data-dir /var/lib/etcd-restore \
+          --name {{ inventory_hostname }} \
+          --initial-cluster {{ inventory_hostname }}=https://{{ ansible_host }}:2380 \
+          --initial-advertise-peer-urls https://{{ ansible_host }}:2380 \
+          --bump-revision 1000000000 --mark-compacted
+        mv /var/lib/etcd /var/lib/etcd.bak-$(date +%Y%m%d-%H%M%S)
+        mv /var/lib/etcd-restore /var/lib/etcd
+
+    - name: Khởi động lại etcd và kube-apiserver
+      ansible.builtin.shell: mv {{ stopped_dir }}/etcd.yaml {{ stopped_dir }}/kube-apiserver.yaml /etc/kubernetes/manifests/
+
+    - name: Chờ API server sẵn sàng
+      ansible.builtin.command: kubectl --kubeconfig /etc/kubernetes/admin.conf get --raw /readyz
+      register: ready
+      until: ready.rc == 0
+      retries: 60
+      delay: 3
+      changed_when: false
+
+    - name: Khởi động lại kubelet, controller-manager, scheduler để bỏ cache cũ
+      ansible.builtin.shell: |
+        systemctl restart kubelet
+        crictl ps --name 'kube-controller-manager|kube-scheduler' -q | xargs -r crictl stop

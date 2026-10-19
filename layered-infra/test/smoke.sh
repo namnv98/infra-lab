@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # Kiểm thử đầu-cuối trên lab ĐANG CHẠY (sau make cluster). Cần VPN bật (make vpn). Không đổi gì trên lab.
-# Giống nhau mọi môi trường (LAB_ENV, mặc định gcp): mọi IP từ envs/<env>/plan.yml, không hỏi bộ tạo máy.
+# Không quan tâm máy chạy ở đâu: mọi IP từ ansible/shared/inventory/hosts.yml, không hỏi bộ tạo máy.
 # Mỗi dòng: tên kiểm thử, mong đợi, thực tế → ĐẠT/LỖI. Thoát mã 1 nếu có kiểm thử lỗi (dùng được trong CI).
 #   ./test/smoke.sh            # chạy hết
 #   ./test/smoke.sh web        # chỉ nhóm có tên chứa "web" (web, vpn, egress, edge, cluster, siem)
 set -uo pipefail
 LAB=$(cd "$(dirname "$0")/.." && pwd); cd "$LAB"
-export LAB_ENV=${LAB_ENV:-gcp}; OUT="out/$LAB_ENV"
-PLAN="python3 -I $LAB/scripts/plan.py get"
+OUT="out"
+INV="python3 -I $LAB/scripts/inventory.py get"
 SSH="$LAB/lab.sh ssh"
 FILTER=${1:-}
 
-WEB_IP=$($PLAN public_web) || exit 1
-APP="whoami.$($PLAN gw_domain public)"
-JUMP=$($PLAN jump_ip); MASTER=$($PLAN group_ip k8s_control_plane); SIEM=$($PLAN group_ip siem)
-read -r GUI_EDGE GUI_CORE <<<"$($PLAN fw_gui)"; DNS=$($PLAN dns); DOMAIN=$($PLAN domain)
+WEB_IP=$($INV public_web) || exit 1
+APP="whoami.$($INV gw_domain public)"
+JUMP=$($INV jump_ip); MASTER=$($INV group_ip k8s_control_plane); SIEM=$($INV group_ip siem)
+read -r GUI_EDGE GUI_CORE <<<"$($INV fw_gui)"; DNS=$($INV dns); DOMAIN=$($INV domain)
 PASS=0; FAIL=0
 
 check() {  # check <nhóm> <tên> <mong đợi> <thực tế>
@@ -29,7 +29,7 @@ tcp() { timeout 5 bash -c "</dev/tcp/$1/$2" 2>/dev/null && echo mở || echo ch�
 remote_tcp() { $SSH "$1" "timeout 5 bash -c '</dev/tcp/$2/$3' 2>/dev/null && echo mở || echo chặn" 2>/dev/null | tail -1; }
 kubectl() { $SSH "$MASTER" "sudo kubectl --kubeconfig /etc/kubernetes/admin.conf $*" 2>/dev/null; }
 
-echo "== Kiểm thử đầu-cuối · môi trường $LAB_ENV · IP web $WEB_IP"
+echo "== Kiểm thử đầu-cuối · IP web $WEB_IP"
 
 if want web; then  # Internet → firewall biên → HAProxy + WAF → Gateway → app
   C=(--resolve "$APP:443:$WEB_IP" --cacert "$OUT/lab-ca.crt")
@@ -52,7 +52,7 @@ if want vpn; then  # VPN quản trị chỉ tới jump-01 + GUI 2 firewall
   check vpn "VPN → Grafana trực tiếp bị chặn"   chặn "$(tcp "$SIEM" 3000)"
   check vpn "VPN → GUI firewall biên"           200  "$(code -k "https://$GUI_EDGE/")"
   check vpn "VPN → GUI firewall core"           200  "$(code -k "https://$GUI_CORE/")"
-  check vpn "DNS nội bộ phân giải harbor"       "$($PLAN group_ip infra)" "$(dig +short +time=3 @"$DNS" "harbor.$DOMAIN")"
+  check vpn "DNS nội bộ phân giải harbor"       "$($INV group_ip infra)" "$(dig +short +time=3 @"$DNS" "harbor.$DOMAIN")"
 fi
 
 if want egress; then  # đi ra Internet: chỉ infra-01 trực tiếp, máy khác qua Squid có allowlist
@@ -60,11 +60,11 @@ if want egress; then  # đi ra Internet: chỉ infra-01 trực tiếp, máy khá
   check egress "master ra thẳng Internet bị chặn"   000 "$($SSH "$MASTER" "curl -s -o /dev/null -w %{http_code} --max-time 8 https://dl.k8s.io/" 2>/dev/null | tail -1)"
   check egress "master qua Squid, tên miền được phép" 200 "$($SSH "$MASTER" "curl -s -o /dev/null -w %{http_code} --max-time 10 -x $PROXY https://dl.k8s.io/" 2>/dev/null | tail -1)"
   check egress "master qua Squid, tên miền ngoài danh sách" 000 "$($SSH "$MASTER" "curl -s -o /dev/null -w %{http_code} --max-time 10 -x $PROXY https://example.com/" 2>/dev/null | tail -1)"
-  check egress "infra-01 ra Internet, NAT bằng IP web" "$WEB_IP" "$($SSH "$($PLAN group_ip infra)" "curl -s --max-time 10 https://api.ipify.org" 2>/dev/null | tail -1)"
+  check egress "infra-01 ra Internet, NAT bằng IP web" "$WEB_IP" "$($SSH "$($INV group_ip infra)" "curl -s --max-time 10 https://api.ipify.org" 2>/dev/null | tail -1)"
 fi
 
 if want edge; then  # edge-01 (DMZ) chỉ tới Gateway public và SIEM
-  EDGE=$($PLAN group_ip edge)
+  EDGE=$($INV group_ip edge)
   check edge "edge-01 → master:22 bị chặn"      chặn "$(remote_tcp "$EDGE" "$MASTER" 22)"
   check edge "edge-01 → siem-01 syslog"         mở   "$(remote_tcp "$EDGE" "$SIEM" 1514)"
   check edge "edge-01 đồng bộ giờ từ firewall"  có   "$($SSH "$EDGE" "chronyc -n sources 2>/dev/null | grep -q '^\^\*' && echo có || echo không" 2>/dev/null | tail -1)"

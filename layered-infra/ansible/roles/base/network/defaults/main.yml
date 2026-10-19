@@ -1,2 +1,0 @@
-# Vùng của máy (plan.yml) — dùng cho IP tĩnh on-prem
-node_zone: "{{ plan.hosts[inventory_hostname].zone }}"

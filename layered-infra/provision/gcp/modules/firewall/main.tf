@@ -35,7 +35,7 @@ resource "google_compute_instance" "fw" {
     # Console nối tiếp: bootstrap lần đầu + cứu hộ (giống IPMI/iLO của máy thật)
     serial-port-enable = "TRUE"
     # config.xml bootstrap (scripts/opnsense-bootstrap.py <vai>): lần boot đầu nạp qua console, giống cắm USB chứa config ở on-prem.
-    # make fw-config sinh file trước apply; thiếu file (máy mới, out/gcp/ trống) thì destroy vẫn chạy được
+    # make fw-config sinh file trước apply; thiếu file (máy mới, out/ trống) thì destroy vẫn chạy được
     opnsense-config = fileexists("${var.bootstrap_dir}/opnsense-${each.value.role}-bootstrap.xml") ? file("${var.bootstrap_dir}/opnsense-${each.value.role}-bootstrap.xml") : ""
   }
 
@@ -50,7 +50,7 @@ resource "google_compute_address" "fw_wan" {
 }
 
 # IP VPN riêng: protocol forwarding GIỮ NGUYÊN IP đích → OPNsense phải có Virtual IP này trên WAN
-# (role network/opnsense, host_vars firewall-edge-01) mới nhận gói.
+# (role opnsense, ansible/network/host_vars/firewall-edge-01.yml) mới nhận gói.
 resource "google_compute_address" "vpn" {
   name   = "${var.prefix}-vpn"
   region = var.region

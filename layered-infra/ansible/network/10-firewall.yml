@@ -1,0 +1,22 @@
+# Mạng: 2 firewall (luật, NAT, DNS, syslog) + bastion + DNS/NTP cho mọi VM + Squid. Chạy lại sau mỗi lần sửa luật.
+#   Luật OPNsense phải có TRƯỚC khi VM đổi DNS/NTP sang firewall.
+#   Đổi DNS của node K8s: CoreDNS tự đọc lại khi platform chạy (platform/20-kubernetes.yml, tag coredns).
+- name: Cấu hình 2 firewall OPNsense qua API (biên + core, gọi xuyên VPN)
+  hosts: firewalls
+  gather_facts: false
+  roles: [opnsense]   # luật riêng từng firewall: host_vars/firewall-*.yml
+
+- name: "Jump server (bastion): siết SSH, ghi lại phiên làm việc"
+  hosts: bastion
+  become: true
+  roles: [bastion]
+
+- name: Mọi VM dùng DNS, NTP của OPNsense
+  hosts: linux
+  become: true
+  roles: [node_network]
+
+- name: Squid trên infra-01 (proxy đi ra có allowlist — mọi node đi Internet qua đây)
+  hosts: infra
+  become: true
+  roles: [squid]

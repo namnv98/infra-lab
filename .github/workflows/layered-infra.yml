@@ -24,7 +24,7 @@ jobs:
           ansible-galaxy collection install -r ansible/requirements.yml
           # tofu của bộ tạo máy GCP đọc khoá SSH công khai (metadata VM) — CI dùng khoá giả
           mkdir -p ~/.ssh && ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519
-      - name: make lint (yamllint, ansible-lint, tofu fmt, plan.yml)
+      - name: make lint (yamllint, ansible-lint, tofu fmt, IP trong hosts.yml)
         run: make lint
       - name: make validate (ansible syntax-check mọi môi trường, tofu validate của provision/gcp)
         run: |

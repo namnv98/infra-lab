@@ -1,0 +1,7 @@
+# edge-01 (DMZ, máy của network) — sự thật về máy này mà team KHÁC cần biết.
+
+# → observability (auditd): user dịch vụ trên máy; user này chạy bất kỳ chương trình nào = dấu hiệu bị chiếm
+audit_service_users: [haproxy]
+
+# → platform, observability: máy tự ra thẳng Internet 80/443, không đi qua Squid (DMZ không vào được LAN, luật #30)
+egress_env: {}

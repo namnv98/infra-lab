@@ -1,0 +1,13 @@
+# Vùng biên trong DMZ — HAProxy (LB, TLS) + WAF (OWASP CRS) trên edge-01.
+#   Cert vùng biên do platform ký (cert-manager, platform/50-apps.yml) và ghi ra edge_tls_file → chạy sau platform tag apps.
+- name: Vùng biên trong DMZ — HAProxy (LB, TLS) + WAF (OWASP CRS)
+  hosts: edge
+  become: true
+  pre_tasks:
+    - name: Có cert vùng biên do platform ký chưa
+      ansible.builtin.assert:
+        that: edge_tls_file is file
+        fail_msg: "Thiếu {{ edge_tls_file }} — chạy platform trước: ansible-playbook platform/site.yml --tags apps"
+      delegate_to: localhost
+      become: false
+  roles: [edge_lb_waf]

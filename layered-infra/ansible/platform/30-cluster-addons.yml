@@ -1,0 +1,27 @@
+# Addon cho cluster: Helm, chứng chỉ kubelet, MetalLB, Gateway API, cert-manager (CA lab), 2 Gateway (public .200,
+# internal .210), metrics-server. App kéo image qua Harbor nên ở 50-apps.yml.
+- name: Helm + duyệt chứng chỉ kubelet
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  environment: "{{ egress_env | combine({'K8S_AUTH_KUBECONFIG': '/etc/kubernetes/admin.conf', 'KUBECONFIG': '/etc/kubernetes/admin.conf'}) }}"
+  roles:
+    - k8s/helm                  # helm + thư viện python kubernetes trên k8s-master-01
+    - k8s/kubelet_csr_approver  # duyệt CSR kubelet-serving (phải có trước khi kubelet xin chứng chỉ)
+
+- name: Kubelet dùng chứng chỉ phục vụ do CA của cluster ký
+  hosts: k8s
+  become: true
+  serial: 1                     # khởi động lại kubelet từng node
+  roles: [k8s/kubelet_tls]
+
+- name: Addon mạng + metrics-server
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  environment: "{{ egress_env | combine({'K8S_AUTH_KUBECONFIG': '/etc/kubernetes/admin.conf', 'KUBECONFIG': '/etc/kubernetes/admin.conf'}) }}"
+  roles:
+    - k8s/metallb         # IP cho Service LoadBalancer
+    - k8s/gateway_api     # CRD Gateway API + bật Gateway trong Cilium
+    - k8s/cert_manager    # cấp cert TLS từ CA riêng của lab
+    - k8s/gateways        # Gateway public và internal
+    - k8s/metrics_server  # kubectl top, HPA (cert từ cert-manager nên đứng sau)
+    - k8s/storage         # StorageClass "standard" mặc định (local-path)

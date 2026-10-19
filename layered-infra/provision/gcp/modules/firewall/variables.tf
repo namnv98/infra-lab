@@ -28,7 +28,7 @@ variable "routes" {
 
 variable "vpn_port" { type = number }
 variable "bootstrap_dir" {
-  description = "Thư mục chứa opnsense-<vai>-bootstrap.xml (out/gcp/)"
+  description = "Thư mục chứa opnsense-<vai>-bootstrap.xml (out/)"
   type        = string
 }
 

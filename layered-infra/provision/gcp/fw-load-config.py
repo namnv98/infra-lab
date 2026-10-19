@@ -3,7 +3,7 @@
 mặc định, tải config bootstrap từ metadata của VM (giống cắm USB chứa config.xml ở on-prem) rồi khởi động lại.
 
 Dùng: fw-console-bootstrap.py <vm> <zone> <project> <gateway của card vtnet1>
-  gateway = .1 của vùng chứa card vtnet1 (00-firewall-bootstrap.yml tính từ plan.yml); chạy song song được
+  gateway = .1 của vùng chứa card vtnet1 (gcp.sh tính từ nics trong hosts.yml); chạy song song được
 """
 import re, subprocess, sys, time
 

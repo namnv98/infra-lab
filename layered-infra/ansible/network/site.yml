@@ -1,0 +1,13 @@
+# Team NETWORK: 2 firewall, VPN, bastion, DNS/NTP cho mọi VM, Squid, vùng biên (HAProxy + WAF).
+# Chỉ đọc shared/ (inventory hosts.yml + hợp đồng); không gọi role/biến của team khác. Thứ tự giữa các team: lab.sh cluster.
+#   Chạy lẻ:  ansible-playbook network/site.yml --tags firewall   (vd. sau khi sửa luật firewall)
+# Tag: bootstrap (never) · firewall · edge
+- name: "Bootstrap 2 firewall mới tạo (chỉ khi gọi --tags bootstrap)"
+  ansible.builtin.import_playbook: 00-firewall-bootstrap.yml
+  tags: [bootstrap, never]
+- name: "Firewall, bastion, DNS/NTP, Squid"
+  ansible.builtin.import_playbook: 10-firewall.yml
+  tags: [firewall]
+- name: "Vùng biên: HAProxy + WAF (cần cert vùng biên do platform ký)"
+  ansible.builtin.import_playbook: 20-edge.yml
+  tags: [edge]

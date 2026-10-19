@@ -1,0 +1,40 @@
+# Biến riêng của team network. Biến dùng chung với team khác: shared/inventory/group_vars/all/contract.yml
+# Số liệu gốc (vùng, card firewall, VPN, node_*, fw_public_ip/vpn_public_ip): shared/inventory/hosts.yml
+
+# Firewall làm DNS/NTP cho máy (theo vùng của máy, biến zone trong hosts.yml) — role node_network
+zone_fw: "{{ zones[zone].fw }}"
+
+wg_admin_pubkey_file: "{{ lab_out }}/wg-admin.pub"   # khoá VPN của máy admin (lab.sh fw-config sinh)
+
+# Firewall core trên LAN (DNS nội bộ, GUI/API core)
+lan_fw: "{{ zones.lan.fw }}"
+
+# VPN quản trị (WireGuard trên firewall biên)
+wg_port: "{{ vpn.port }}"
+wg_server_address: "{{ vpn.server }}/{{ vpn.cidr.split('/')[1] }}"
+wg_admin_address: "{{ vpn.admin }}/32"
+
+# Vùng biên (edge-01): HAProxy → WAF (ModSecurity + OWASP CRS) → Gateway public
+waf_paranoia: 1            # 1 = ít báo nhầm; tăng 2–4 để chặt hơn
+waf_anomaly_inbound: 5     # ngưỡng điểm bất thường để chặn (mặc định CRS)
+waf_image: owasp/modsecurity-crs:4.30.0-nginx-alpine-202610051210   # ModSecurity v3 + OWASP CRS v4 (DMZ kéo thẳng Docker Hub)
+
+# Tên miền node được phép ra qua Squid (apt, tải công cụ, Helm chart). Image container KHÔNG nằm đây: đi qua Harbor.
+# Team khác cần thêm tên miền → PR vào file này.
+squid_allowed_domains:
+  - .ubuntu.com            # archive, security
+  - pkgs.k8s.io
+  - prod-cdn.packages.k8s.io
+  - dl.k8s.io
+  - cdn.dl.k8s.io
+  - github.com
+  - .githubusercontent.com
+  - get.helm.sh
+  - packages.wazuh.com     # wazuh-agent (apt)
+  - metallb.github.io
+  - charts.jetstack.io
+  - kyverno.github.io                # Helm chart Kyverno
+  - prometheus-community.github.io   # Helm chart kube-prometheus-stack
+  - vmware-tanzu.github.io           # Helm chart Velero
+  - kubernetes-sigs.github.io        # Helm chart metrics-server
+  - postfinance.github.io            # Helm chart kubelet-csr-approver

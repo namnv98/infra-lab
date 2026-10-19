@@ -5,7 +5,7 @@ GCP := provision/gcp/gcp.sh
 provision-gcp: ## [gcp] tofu apply → ghi IP public (provisioned.yml) → nạp config bootstrap vào firewall mới
 	$(GCP) up
 
-gcp-plan: ## [gcp] Xem trước thay đổi hạ tầng (kiểm tra plan.yml trước)
+gcp-plan: ## [gcp] Xem trước thay đổi hạ tầng (kiểm tra hosts.yml trước)
 	$(GCP) plan
 
 gcp-image: ## [gcp] 1 lần: golden image OPNsense dựng ngay trên GCP (~5 phút)

@@ -1,0 +1,10 @@
+# Phiên bản phần mềm của observability — nâng cấp: sửa ở đây, chạy lại observability/site.yml
+# Image chạy ngoài cluster, kéo qua Harbor (harbor_host, platform cung cấp)
+wazuh_version: "4.14.9"
+mon_images:
+  loki: "{{ harbor_host }}/dockerhub/grafana/loki:3.6.18"
+  alloy: "{{ harbor_host }}/dockerhub/grafana/alloy:v1.20.1"
+  grafana: "{{ harbor_host }}/dockerhub/grafana/grafana:13.2.4"
+mon_images_extra:
+  mailpit: "{{ harbor_host }}/dockerhub/axllent/mailpit:v1.31.6"
+wazuh_image: "{{ harbor_host }}/dockerhub/wazuh/wazuh-manager:4.14.9"

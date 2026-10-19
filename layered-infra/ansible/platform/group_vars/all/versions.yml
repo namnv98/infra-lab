@@ -1,0 +1,17 @@
+# Phiên bản phần mềm của platform (K8s, addon, Harbor) ở một chỗ — nâng cấp: sửa ở đây, chạy lại playbook tương ứng
+k8s_version: "1.37.1"                  # bản patch cụ thể, mọi node dùng cùng một bản
+k8s_minor: "{{ k8s_version.split('.')[:2] | join('.') }}"   # 1.37 → chọn repo apt
+etcd_version: "v3.7.0"                 # khớp image etcd mà kubeadm 1.37 dùng
+kube_vip_version: "v1.2.4"
+cilium_version: "1.20.2"
+cilium_cli_version: "v0.20.1"
+helm_version: "v3.22.1"
+metallb_version: "0.16.1"
+gateway_api_version: "v1.6.1"          # đúng bản Cilium 1.20 hỗ trợ
+cert_manager_version: "v1.21.2"
+kubelet_csr_approver_version: "1.2.15"   # chart = app (duyệt chứng chỉ phục vụ của kubelet)
+metrics_server_chart_version: "3.14.0"   # metrics-server 0.9.0
+local_path_version: "v0.0.37"            # local-path-provisioner (StorageClass "standard")
+busybox_version: "1.37"                  # pod phụ của local-path (tạo/xoá thư mục volume)
+kube_bench_version: "v0.16.0"
+harbor_version: "v2.15.4"

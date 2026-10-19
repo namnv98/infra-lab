@@ -1,0 +1,22 @@
+- name: "NetworkPolicy cho namespace demo (app: chỉ nhận từ Gateway)"
+  kubernetes.core.k8s:
+    template: demo-netpol.yaml.j2
+
+# Dựng từ đầu: kube-bench, monitoring, velero do role chạy SAU tạo (60 kube_bench, 70 metrics, 80 backup) → tạo trước
+# namespace trống để policy có chỗ nằm, pod sinh ra là đã bị chặn đúng ngay từ đầu. Role sau chỉ gộp thêm nhãn (k8s apply = merge).
+- name: Namespace có sẵn trước khi đặt policy
+  kubernetes.core.k8s:
+    kind: Namespace
+    name: "{{ item.key }}"
+    state: present
+  loop: "{{ netpol_namespaces | dict2items }}"
+  loop_control: { label: "{{ item.key }}" }
+  when: not netpol_only or item.key in netpol_only
+
+- name: Mặc định chặn cho các namespace còn lại (CiliumNetworkPolicy "baseline")
+  kubernetes.core.k8s:
+    template: baseline-netpol.yaml.j2
+  vars: { netpol_ns: "{{ item.key }}", netpol_cfg: "{{ item.value }}" }   # tên riêng: biến register "cfg" của role khác được ưu tiên hơn biến task
+  loop: "{{ netpol_namespaces | dict2items }}"
+  loop_control: { label: "{{ item.key }}" }
+  when: not netpol_only or item.key in netpol_only

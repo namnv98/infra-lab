@@ -1,0 +1,2 @@
+# Vùng của máy (zone trong hosts.yml) — dùng cho IP tĩnh on-prem
+node_zone: "{{ zone }}"

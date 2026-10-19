@@ -1,0 +1,56 @@
+- name: Tắt cấu hình mạng của cloud-init (để nó không ghi đè netplan khi boot)
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+    content: "network: {config: disabled}\n"
+    mode: "0644"
+
+- name: "Netplan: {{ 'IP tĩnh + gateway = OPNsense của VLAN' if node_network_mode == 'static' else 'DNS là OPNsense (route do VPC trỏ vào OPNsense)' }}"
+  ansible.builtin.template:
+    src: netplan.yaml.j2
+    dest: /etc/netplan/50-cloud-init.yaml   # tên file cloud-init/installer Ubuntu tạo sẵn cho card chính → ghi đè, không cấu hình 2 nơi
+    mode: "0600"
+  register: np
+
+- name: Bỏ route DMZ riêng cũ (default route qua OPNsense đã bao gồm)
+  ansible.builtin.file:
+    path: /etc/netplan/60-dmz-route.yaml
+    state: absent
+  register: np_old
+
+- name: Áp dụng netplan
+  ansible.builtin.command: netplan apply
+  when: np is changed or np_old is changed
+
+# NTP lấy từ OPNsense của vùng. GCP: image dùng chrony · Ubuntu cài thường: systemd-timesyncd (ntp_client trong hosts.yml)
+- name: NTP lấy từ OPNsense (chrony), bỏ NTP metadata của Google
+  when: ntp_client == 'chrony'
+  ansible.builtin.copy:
+    dest: /etc/chrony/chrony.conf
+    content: |
+      # Do Ansible quản lý (role node_network): giờ lấy từ OPNsense trong vùng, như on-prem
+      server {{ zone_fw }} iburst prefer
+      keyfile /etc/chrony/chrony.keys
+      driftfile /var/lib/chrony/chrony.drift
+      logdir /var/log/chrony
+      maxupdateskew 100.0
+      rtcsync
+      makestep 1 3
+    mode: "0644"
+  notify: Restart chrony
+
+- name: NTP lấy từ OPNsense (systemd-timesyncd)
+  when: ntp_client == 'systemd-timesyncd'
+  block:
+    - name: Thư mục cấu hình timesyncd
+      ansible.builtin.file: { path: /etc/systemd/timesyncd.conf.d, state: directory, mode: "0755" }
+
+    - name: Máy chủ NTP = OPNsense, không dùng NTP công cộng dự phòng
+      ansible.builtin.copy:
+        dest: /etc/systemd/timesyncd.conf.d/lab.conf
+        content: |
+          # Do Ansible quản lý (role node_network): giờ lấy từ OPNsense trong vùng
+          [Time]
+          NTP={{ zone_fw }}
+          FallbackNTP=
+        mode: "0644"
+      notify: Restart timesyncd

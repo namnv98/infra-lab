@@ -1,0 +1,29 @@
+## Do Ansible quản lý (role auditd, team observability). Mỗi luật có -k <khoá> để lọc/cảnh báo ở Loki.
+
+## Danh tính và quyền
+-w /etc/passwd -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/sudoers -p wa -k privilege
+-w /etc/sudoers.d/ -p wa -k privilege
+-w /etc/ssh/sshd_config -p wa -k sshd_config
+-w /root/.ssh/ -p wa -k ssh_keys
+-w /home/ubuntu/.ssh/ -p wa -k ssh_keys
+
+## Cách kẻ tấn công thường dùng để bám trụ (persistence)
+-w /etc/systemd/system/ -p wa -k persistence
+-w /etc/cron.d/ -p wa -k persistence
+-w /var/spool/cron/ -p wa -k persistence
+{% if inventory_hostname in groups['k8s'] %}
+
+## Cấu hình Kubernetes trên node
+-w /etc/kubernetes/ -p wa -k k8s_config
+{% endif %}
+{% for u in service_uids | default([]) %}
+
+## User dịch vụ mạng chạy chương trình: bình thường KHÔNG BAO GIỜ xảy ra → dấu hiệu bị chiếm
+-a always,exit -F arch=b64 -S execve -F uid={{ u }} -k svc_exec
+{% endfor %}
+
+## Người dùng tương tác chạy lệnh bằng quyền root (sudo)
+-a always,exit -F arch=b64 -S execve -F euid=0 -F auid>=1000 -F auid!=unset -k root_cmd

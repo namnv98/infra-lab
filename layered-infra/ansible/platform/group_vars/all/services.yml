@@ -1,0 +1,8 @@
+# Dịch vụ dùng chung trên infra-01 của platform: Harbor (cache image) + kho S3 Garage. Squid là của network.
+
+# Mỗi registry ngoài = 1 project proxy-cache trong Harbor; containerd trên node trỏ vào đây
+harbor_proxies:
+  - { project: dockerhub, upstream: docker.io,       type: docker-hub,      url: "https://hub.docker.com" }
+  - { project: k8s,       upstream: registry.k8s.io, type: docker-registry, url: "https://registry.k8s.io" }
+  - { project: ghcr,      upstream: ghcr.io,         type: github-ghcr,     url: "https://ghcr.io" }
+  - { project: quay,      upstream: quay.io,         type: docker-registry, url: "https://quay.io" }   # loại "quay" không hỗ trợ proxy-cache

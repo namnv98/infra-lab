@@ -1,0 +1,50 @@
+# ============================================================================================================
+# HỢP ĐỒNG giữa 3 team: thứ một team CUNG CẤP mà team khác DÙNG. Chỉ những biến như vậy mới được nằm ở đây.
+#   - Biến chỉ 1 team dùng → <team>/group_vars/ của team đó, KHÔNG để ở đây.
+#   - Số liệu gốc (IP, vùng, VIP, Gateway, tên miền) nằm ở shared/inventory/hosts.yml; file này chỉ đặt tên cho thứ dẫn ra từ đó.
+#   - Sửa file này = đổi giao diện giữa các team → cả 3 team cùng duyệt.
+# Mỗi biến ghi: ai cung cấp → ai dùng.
+# Có sẵn trong hosts.yml, cả 3 team dùng thẳng: lab_domain, zones, vpn, api_vip, gateways (Gateway của cluster → network:
+#   port forward, WAF, DNS nội bộ), ansible_host của từng máy.
+# ============================================================================================================
+
+
+# ------------------------------------------------------------------------------------------------------------
+# NETWORK cung cấp: đường SSH, proxy đi ra Internet
+# ------------------------------------------------------------------------------------------------------------
+jump_ip: "{{ hostvars[groups['bastion'][0]].ansible_host }}"   # jump-01 → mọi team (Ansible SSH xuyên qua máy này, xem paths.yml)
+
+proxy_url: "http://proxy.{{ lab_domain }}:3128"         # Squid trên infra-01 → platform, observability
+proxy_no: "localhost,127.0.0.1,{{ ([api_vip] + groups['k8s'] | map('extract', hostvars, 'ansible_host')) | join(',') }},10.0.0.0/8,.svc,.cluster.local,.{{ lab_domain }}"
+proxy_env:                                              # biến môi trường cho lệnh cần tải từ Internet (helm, get_url…)
+  http_proxy: "{{ proxy_url }}"
+  https_proxy: "{{ proxy_url }}"
+  HTTP_PROXY: "{{ proxy_url }}"
+  HTTPS_PROXY: "{{ proxy_url }}"
+  no_proxy: "{{ proxy_no }}"
+  NO_PROXY: "{{ proxy_no }}"
+
+# Công tắc "đường ra Internet": lab.sh đặt CÙNG một giá trị cho cả 3 team trong một lần dựng.
+#   true  = lúc dựng: network mở luật tạm, node đi thẳng ra Internet (Harbor chưa có cache)
+#   false = bình thường: chỉ infra-01 ra Internet, mọi node đi qua Squid
+egress_temp_open: false
+# Dùng trong `environment:` của play → platform, observability. Máy tự ra thẳng Internet đặt {} ở shared/inventory/host_vars/.
+egress_env: "{{ {} if egress_temp_open | bool else proxy_env }}"
+
+# ------------------------------------------------------------------------------------------------------------
+# PLATFORM cung cấp: cluster, Harbor, CA của lab, cert vùng biên
+# ------------------------------------------------------------------------------------------------------------
+svc_ip: "{{ hostvars[groups['infra'][0]].ansible_host }}"       # infra-01 (máy dịch vụ) → observability (bản sao log); Squid của network cũng chạy ở đây
+harbor_host: "harbor.{{ lab_domain }}"                  # registry → observability (image của SIEM kéo qua đây)
+lab_ca_local: "{{ lab_out }}/lab-ca.crt"                # CA của lab (cert-manager) → network (HAProxy), observability
+# Cert vùng biên (cert + key, 1 file PEM): platform ghi ra (platform/50-apps.yml) → network cài lên HAProxy edge-01
+# (network/20-edge.yml). Hai team trao đổi qua FILE, không gọi chéo playbook của nhau.
+edge_tls_file: "{{ lab_out }}/edge-tls.pem"
+
+# ------------------------------------------------------------------------------------------------------------
+# OBSERVABILITY cung cấp: nơi nhận log/sự kiện (siem-01)
+# ------------------------------------------------------------------------------------------------------------
+mon_ip: "{{ hostvars[groups['siem'][0]].ansible_host }}"        # siem-01 → network (firewall gửi syslog, luật mở tới đây)
+mon_syslog_port: 1514                                   # syslog TCP, RFC5424 → network (firewall gửi về, alias syslog_ports)
+wazuh_enroll_port: 1515                                 # Wazuh: agent đăng ký → network (alias wazuh_ports)
+wazuh_agent_port: 1516                                  # Wazuh: agent gửi sự kiện (1514 đã dành cho syslog) → network (alias wazuh_ports)

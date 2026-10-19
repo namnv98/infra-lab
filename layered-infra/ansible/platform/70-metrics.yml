@@ -1,0 +1,8 @@
+# Metric trong cluster: Prometheus + node-exporter + kube-state-metrics. SIEM (log, Wazuh) là của observability.
+#   lab.sh chạy song song: platform "--tags security,metrics" ‖ observability/site.yml (Helm không được chạy lúc apiserver khởi động lại).
+- name: Prometheus + node-exporter + kube-state-metrics
+  hosts: "{{ groups['k8s_control_plane'][0] }}"
+  become: true
+  environment: "{{ egress_env | combine({'K8S_AUTH_KUBECONFIG': '/etc/kubernetes/admin.conf', 'KUBECONFIG': '/etc/kubernetes/admin.conf'}) }}"
+  roles:
+    - k8s/prometheus

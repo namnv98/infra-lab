@@ -1,0 +1,34 @@
+# Ansible chạy trên máy admin, gọi REST API của OPNsense (qua VPN)
+ansible_connection: local
+ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
+# Alias dùng chung cho 2 firewall — IP lấy từ hosts.yml (luật từng firewall ở network/host_vars/firewall-*.yml; alias riêng: opn_aliases_host)
+opn_aliases:
+  - { name: RFC1918, type: network, content: "10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16", description: "Mọi dải IP nội bộ" }
+  - { name: web_ports, type: port, content: "80\n443", description: "HTTP + HTTPS" }
+  - { name: admin_ports, type: port, content: "22\n80\n443", description: "SSH + HTTP(S) để quản trị" }
+  - { name: gw_public, type: host, content: "{{ gateways.public.ip }}", description: "Gateway public trong cluster" }
+  - { name: haproxy_dmz, type: host, content: "{{ hostvars[groups['edge'][0]].ansible_host }}", description: "HAProxy trong DMZ" }
+  - { name: svc_hosts, type: host, content: "{{ hostvars[groups['infra'][0]].ansible_host }}", description: "Máy dịch vụ được ra Internet (Harbor, Squid)" }
+  - { name: mon_host, type: host, content: "{{ hostvars[groups['siem'][0]].ansible_host }}", description: "siem-01: Loki, Grafana, Alloy (thu log)" }
+  - { name: gw_internal, type: host, content: "{{ gateways.internal.ip }}", description: "Gateway internal trong cluster (*.int.lab.internal)" }
+  - { name: jump_host, type: host, content: "{{ hostvars[groups['bastion'][0]].ansible_host }}", description: "Jump server (bastion) trong MGMT" }
+  - { name: jump_admin_ports, type: port, content: "22\n80\n443\n3000\n6443\n8025", description: "Cổng jump server được mở tới máy trong: SSH, web, Grafana, K8s API, Mailpit" }
+  - { name: admin_hosts, type: network, content: "{{ vpn.cidr }}", description: "Máy quản trị (qua VPN WireGuard)" }
+  - { name: fw_edge_dmz, type: host, content: "{{ zones.dmz.fw }}", description: "Firewall biên, card DMZ" }
+  - { name: fw_core_dmz, type: host, content: "{{ (hostvars['firewall-core-01'].nics | selectattr('default_gw', 'defined') | first).ip }}", description: "Firewall core, card ra ngoài (GCP: DMZ · on-prem: transit)" }
+  - { name: fw_edge_in, type: host, content: "{{ (hostvars['firewall-edge-01'].nics | selectattr('zone', 'equalto', (hostvars['firewall-core-01'].nics | selectattr('default_gw', 'defined') | first).zone) | first).ip }}", description: "Firewall biên, card nối sang core (GCP: DMZ · on-prem: transit)" }
+  - { name: fw_core_lan, type: host, content: "{{ zones.lan.fw }}", description: "Firewall core, card LAN (GUI/API, DNS nội bộ)" }
+  - { name: dmz_clients, type: host, content: "{{ hostvars[groups['edge'][0]].ansible_host }}\n{{ (hostvars['firewall-core-01'].nics | selectattr('default_gw', 'defined') | first).ip }}", description: "Máy trong DMZ dùng DNS/NTP của biên: edge-01, card ngoài của core" }
+  - { name: syslog_ports, type: port, content: "{{ mon_syslog_port | string }}", description: "Syslog → siem-01 (mon_syslog_port, contract.yml)" }
+  - { name: svc_ports, type: port, content: "443\n3128\n3100", description: "Harbor + Squid + Loki bản sao" }
+  - { name: wazuh_ports, type: port, content: "{{ wazuh_enroll_port }}\n{{ wazuh_agent_port }}", description: "Wazuh agent: đăng ký + gửi sự kiện (contract.yml)" }
+
+# DNS nội bộ trên Unbound của firewall core (role chỉ áp cho opn_role core)
+opn_host_overrides:
+  - { hostname: harbor, ip: "{{ hostvars[groups['infra'][0]].ansible_host }}", description: "Harbor registry" }
+  - { hostname: proxy,  ip: "{{ hostvars[groups['infra'][0]].ansible_host }}", description: "Squid proxy" }
+  - { hostname: mon,    ip: "{{ hostvars[groups['siem'][0]].ansible_host }}", description: "siem-01: Grafana, Loki" }
+# App sau Gateway internal: mỗi app 1 bản ghi. KHÔNG dùng hostname "*" — Unbound của OPNsense 26.7 không nhận, dừng hẳn.
+  - { hostname: prometheus, domain: "{{ gateways.internal.domain }}", ip: "{{ gateways.internal.ip }}", description: "Prometheus (Gateway internal)" }
+  - { hostname: whoami, domain: "{{ gateways.internal.domain }}", ip: "{{ gateways.internal.ip }}", description: "App demo (Gateway internal)" }

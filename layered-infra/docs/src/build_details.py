@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sinh phần "Chi tiết" của docs/architecture.html: 4 sơ đồ luồng, sơ đồ bên trong cluster, 2 ma trận luật firewall.
 
-Ma trận luật đọc thẳng từ ansible/inventories/gcp/host_vars/firewall-{edge,core}-01.yml (opn_rules) + ansible/group_vars/firewalls.yml (opn_aliases),
+Ma trận luật đọc thẳng từ ansible/network/host_vars/firewall-{edge,core}-01.yml (opn_rules) + ansible/network/group_vars/firewalls.yml (opn_aliases),
 nên luôn khớp với thứ Ansible đẩy lên 2 firewall. Chạy lại sau mỗi lần đổi luật/kiến trúc:
     python3 docs/src/build_details.py
 Kết quả chèn giữa <!-- CHI-TIET:BEGIN --> và <!-- CHI-TIET:END --> trong docs/architecture.html .
@@ -12,8 +12,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def ansible_vars(host, *names):
-    """Giá trị biến SAU khi Ansible render (IP trong alias/luật là biểu thức đọc plan.yml)."""
-    out = subprocess.run(["ansible", host, "-m", "debug", "-a", "var=[" + ",".join(names) + "]"], cwd=ROOT / "ansible",
+    """Giá trị biến SAU khi Ansible render (IP trong alias/luật là biểu thức đọc inventory hosts.yml)."""
+    # biến của team network: group_vars + host_vars (luật từng firewall) cạnh playbook của team (--playbook-dir network)
+    out = subprocess.run(["ansible", host, "--playbook-dir", "network",
+                          "-m", "debug", "-a", "var=[" + ",".join(names) + "]"], cwd=ROOT / "ansible",
                          capture_output=True, text=True, check=True, env={**os.environ, "ANSIBLE_STDOUT_CALLBACK": "json",
                                                                           "ANSIBLE_LOAD_CALLBACK_PLUGINS": "1"}).stdout
     res = json.loads(out)["plays"][0]["tasks"][0]["hosts"][host]
@@ -21,7 +23,7 @@ def ansible_vars(host, *names):
 
 
 FWV = {r: ansible_vars(f"firewall-{r}-01", "opn_rules", "opn_aliases") for r in ("edge", "core")}
-GV = {"opn_aliases": FWV["edge"]["opn_aliases"]}   # alias dùng chung (ansible/group_vars/firewalls.yml)
+GV = {"opn_aliases": FWV["edge"]["opn_aliases"]}   # alias dùng chung (ansible/network/group_vars/firewalls.yml)
 E = html.escape
 
 # ---------------------------------------------------------------- khung chung
@@ -292,7 +294,7 @@ def table(rows):
 
 RE, RC = matrix("edge"), matrix("core")
 F6 = ('<h3 id="fl-rules">Ma trận luật 2 firewall</h3>\n'
-      '<p>Sinh tự động từ <code>ansible/inventories/gcp/host_vars/firewall-{edge,core}-01.yml</code> — đúng thứ Ansible đẩy lên OPNsense. '
+      '<p>Sinh tự động từ <code>ansible/network/host_vars/firewall-{edge,core}-01.yml</code> — đúng thứ Ansible đẩy lên OPNsense. '
       'Luật xét theo card nhận gói, số nhỏ trước, khớp là dừng; cuối mỗi card là luật chặn mọi thứ còn lại (ghi log → SIEM). '
       'Ngoài bảng: ở biên có port forward WAN 80/443 → edge-01 (giữ IP client) và Source NAT hybrid cho LAN/MGMT; core tắt NAT. '
       'Firewall VPC của GCP chỉ mở WAN 80/443/51820 vào máy gắn tag <code>fw</code> (biên).</p>\n'

@@ -1,0 +1,21 @@
+# Squid: proxy đi ra có danh sách cho phép. Node không ra thẳng Internet được (firewall chặn);
+# muốn tải gì phải qua đây, và mọi request đều có trong /var/log/squid/access.log.
+http_port 3128
+
+# LAN + MGMT được dùng proxy
+acl lan src {{ zones.lan.cidr }} {{ zones.mgmt.cidr }}
+acl allowed dstdomain "/etc/squid/allowed-domains.txt"
+acl SSL_ports port 443
+acl Safe_ports port 80 443
+acl CONNECT method CONNECT
+
+http_access deny !Safe_ports
+http_access deny CONNECT !SSL_ports
+http_access allow lan allowed
+http_access deny all
+
+# Chỉ chuyển tiếp, không cache trên đĩa (apt tự cache phía client)
+cache deny all
+access_log daemon:/var/log/squid/access.log squid
+forwarded_for delete
+via off

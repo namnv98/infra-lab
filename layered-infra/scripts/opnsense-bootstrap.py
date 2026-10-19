@@ -3,7 +3,7 @@
 
 Chỉ chứa phần tối thiểu để Ansible vào được qua API lần đầu:
   - gán card + IP + MTU, gateway từng vùng, route, DNS hệ thống (theo vai edge/core)
-  - mật khẩu root + 1 API key (sinh ngẫu nhiên, lưu ở out/<env>/)
+  - mật khẩu root + 1 API key (sinh ngẫu nhiên, lưu ở out/)
   - 1 luật TẠM trên WAN: chỉ IP public của máy admin được vào API (443). Ansible xoá luật này khi VPN đã chạy.
 Mọi thứ khác (VPN, alias, luật, NAT, DNS nội bộ, syslog) do role Ansible `opnsense` cấu hình.
 
@@ -19,14 +19,14 @@ import xml.etree.ElementTree as ET
 
 factory, outdir, admin_ip, role = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3], sys.argv[4]
 
-# Card, IP, gateway, route: đọc từ plan.yml (nguồn IP duy nhất, scripts/plan.py). Card theo thứ tự = vtnet0..n.
+# Card, IP, gateway, route: đọc từ inventory hosts.yml (nguồn IP duy nhất, scripts/inventory.py). Card theo thứ tự = vtnet0..n.
 # GCP không trả lời ARP giữa các VM → mọi gateway trong VPC là .1 của subnet, bật far gateway (trừ WAN).
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import plan as planlib
-P = planlib.load()
+import inventory as invlib
+P = invlib.load()
 fw_name, FW = next((k, f) for k, f in P["firewalls"].items() if f["role"] == role)
 GCP = P.get("platform", "gcp") == "gcp"
-# dev: tên card trong FreeBSD — mặc định vtnet<i> (virtio: KVM/Proxmox/GCP); VMware: vmx<i>, máy thật: igb<i>/em<i>/ix<i> → ghi dev trong plan
+# dev: tên card trong FreeBSD — mặc định vtnet<i> (virtio: KVM/Proxmox/GCP); VMware: vmx<i>, máy thật: igb<i>/em<i>/ix<i> → ghi dev trong nics (hosts.yml)
 zones_t = [(n["if"], n.get("dev", f"vtnet{i}"), n["ip"], n.get("descr"), P["zones"][n["zone"]]["cidr"].split("/")[1])
            for i, n in enumerate(FW["nics"])]
 my_nic = {n["zone"]: n for n in FW["nics"]}
@@ -38,7 +38,7 @@ if GCP:
         far = n["zone"] != "wan"
         GW.append((f"{n['zone'].upper()}_GW", n["if"], P["zones"][n["zone"]]["gateway"], bool(n.get("default_gw")), far))
         if far:
-            RT += [(h, f"{n['zone'].upper()}_GW", "GCP: tới VM cùng vùng qua gateway VPC") for h in planlib.halves(P["zones"][n["zone"]]["cidr"])]
+            RT += [(h, f"{n['zone'].upper()}_GW", "GCP: tới VM cùng vùng qua gateway VPC") for h in invlib.halves(P["zones"][n["zone"]]["cidr"])]
     RT += [(P["zones"][r["to"]]["cidr"], f"{r['in'].upper()}_GW", "Vào trong qua firewall core (route VPC lab-dmz → core)")
            for r in P["extra_routes"] if r["in"] in my_nic and r["via"] != fw_name]
 else:
@@ -49,7 +49,7 @@ else:
         if r["in"] in my_nic and r["via"] != fw_name:
             gname = r["via"].split("-")[1].upper() + "_GW"      # vd. firewall-core-01 → CORE_GW
             if gname not in [g[0] for g in GW]:
-                GW.append((gname, my_nic[r["in"]]["if"], planlib.nic(P, r["via"], r["in"]), False, False))
+                GW.append((gname, my_nic[r["in"]]["if"], invlib.nic(P, r["via"], r["in"]), False, False))
             RT.append((P["zones"][r["to"]]["cidr"], gname, f"Vào {r['to'].upper()} qua {r['via']}"))
 uplink = next(n for n in FW["nics"] if n.get("default_gw"))
 if role == "edge":   # biên: chỉ IP public của admin được gọi API trên WAN
@@ -62,7 +62,7 @@ else:                # core: không IP public → dải VPN (đi xuyên biên) g
 ROLES = {role: dict(hostname=fw_name, dns=FW["dns"], zones=zones_t, boot_rule=boot)}
 R = ROLES[role]
 ZONES = R["zones"]
-MTU = str(P.get("mtu", 1500))   # plan.yml (GCP: 1460 của VPC)
+MTU = str(P.get("mtu", 1500))   # lab_mtu trong hosts.yml (GCP: 1460 của VPC)
 
 
 def rnd(n):
@@ -115,7 +115,7 @@ u = s.find("user")
 sub(u, "password", crypt6(root_pw))
 sub(u, "apikeys", f"{api_key}|{crypt6(api_secret)}")
 
-# --- interfaces: IP tĩnh, MTU theo plan.yml, tắt IPv6 ---
+# --- interfaces: IP tĩnh, MTU theo hosts.yml, tắt IPv6 ---
 ifs = r.find("interfaces")
 for name, nic, ip, descr, prefix in ZONES:
     e = ifs.find(name)

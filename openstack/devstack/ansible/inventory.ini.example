@@ -1,0 +1,2 @@
+[devstack]
+devstack_vm ansible_host=203.0.113.10

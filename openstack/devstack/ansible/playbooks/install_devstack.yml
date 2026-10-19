@@ -1,0 +1,42 @@
+---
+# Cài DevStack lên một host Ubuntu 24.04 đã chạy sẵn, qua SSH. Playbook này
+# KHÔNG biết và không quan tâm host đó được tạo ra bằng cách nào (VM KVM cục
+# bộ, VM cloud, máy vật lý...) — chỉ cần trỏ đúng vào nó qua inventory chuẩn
+# của Ansible:
+#
+#   ansible-playbook -i "<IP>," playbooks/install_devstack.yml
+#   ansible-playbook -i inventory.ini playbooks/install_devstack.yml   (xem inventory.ini.example)
+#
+# Yêu cầu trên host đích (KHÔNG do playbook này tự làm — phải có sẵn trước,
+# ví dụ qua cloud-init lúc tạo VM, xem vm/create-vm.sh cho trường hợp KVM):
+#   - user SSH đăng nhập được (mặc định giả định "ubuntu", đổi qua ansible_user
+#     hoặc -e ansible_user=... nếu host khác), có sudo không cần mật khẩu.
+#   - user "stack" tồn tại, có sudo không cần mật khẩu (DevStack không chạy
+#     bằng root).
+#   - đã cài git.
+#
+# Chạy lại được nhiều lần TRÊN HOST CHƯA STACK LẦN NÀO THÀNH CÔNG (ví dụ lần
+# trước stack.sh lỗi giữa đường, sửa group_vars/all.yml hoặc
+# roles/devstack/templates/local.conf.j2 rồi chạy lại). KHÔNG chạy lại sau khi
+# đã "stack.sh completed" — xem README, mục "Điều đã biết": chạy lại stack.sh
+# trên host đã có network (Neutron/OVN) sẽ hỏng. Cần đổi cấu hình sau khi đã
+# stack xong thì dựng host mới.
+- name: Cài DevStack
+  hosts: all
+  gather_facts: false
+  # group_vars/ tự nạp theo thư mục chứa PLAYBOOK hoặc theo thư mục inventory —
+  # ở đây playbook nằm trong playbooks/ (không phải gốc ansible/) và inventory
+  # dùng kiểu ad-hoc "-i '<IP>,'" (không phải file) nên cả 2 quy tắc tự nạp đều
+  # không khớp. Nạp rõ ràng để không phụ thuộc cách trỏ inventory.
+  vars_files:
+    - ../group_vars/all.yml
+  # pre_tasks chạy TRƯỚC roles (thứ tự thật của Ansible là pre_tasks → roles →
+  # tasks → post_tasks, không theo thứ tự viết trong file — để wait_for_connection
+  # ở "tasks:" sẽ chạy SAU role devstack, mất hết ý nghĩa chờ).
+  pre_tasks:
+    - name: Chờ host chấp nhận kết nối SSH
+      ansible.builtin.wait_for_connection:
+        timeout: 180
+
+  roles:
+    - devstack

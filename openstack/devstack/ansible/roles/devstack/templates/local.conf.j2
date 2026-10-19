@@ -1,0 +1,40 @@
+[[local|localrc]]
+ADMIN_PASSWORD={{ admin_password }}
+DATABASE_PASSWORD=$ADMIN_PASSWORD
+RABBIT_PASSWORD=$ADMIN_PASSWORD
+SERVICE_PASSWORD=$ADMIN_PASSWORD
+HOST_IP={{ ansible_host | default(inventory_hostname) }}
+LOGFILE=$DEST/logs/stack.sh.log
+LOG_COLOR=False
+
+disable_service tempest
+
+# c-bak: Cinder Backup, backup volume theo kiểu incremental (chỉ backup phầnthay đổi).
+# Driver mặc định là "swift" (CINDER_BACKUP_DRIVER), nên cần Swift đang bật thì c-bak mới có nơi lưu backup.
+enable_service c-bak
+VOLUME_BACKING_FILE_SIZE=30G
+
+# Swift (object storage). SWIFT_HASH bắt buộc phải có giá trị khi s-proxy bật —
+# thiếu thì stack.sh gọi read_password() hỏi tương tác "ENTER A RANDOM SWIFT
+# HASH", treo vô hạn vì chạy qua Ansible không có stdin (rồi lỗi khi gặp EOF).
+enable_service s-proxy s-object s-container s-account
+SWIFT_HASH=devstack-lab-swift-hash
+# DevStack tự đặt max_file_size = 1GB khi bật Swift (nhỏ hơn cả giá trị 5GB gốc
+# của Swift). Khi Swift bật, Glance TỰ ĐỘNG đổi default_store sang swift, và
+# Trove build guest image có sẵn datastore (~1.4GB, do TROVE_EMBED_DATASTORE_
+# IMAGES mặc định True) lớn hơn 1GB đó → Swift trả 413 Request Entity Too
+# Large khi Glance PUT ảnh vào. Đặt lại đúng giá trị gốc 5GB.
+SWIFT_MAX_FILE_SIZE=5368709122
+
+# Network Trunk (gắn nhiều network vào 1 port qua VLAN tag) và Network QoS
+# (giới hạn băng thông port/network) — KHÔNG bật theo mặc định trong lab OVN
+# này (đã xác nhận: thiếu dòng này thì API trả 404). Cả 2 là service plugin
+# có sẵn trong Neutron, không cần clone plugin riêng, chỉ cần enable_service
+# đúng tên (đã test tạo thật QoS policy + network trunk, hoạt động đúng).
+enable_service q-trunk q-qos
+
+{% for p in devstack_plugins -%}
+enable_plugin {{ p.name }} {{ p.url }}
+{% endfor -%}
+
+

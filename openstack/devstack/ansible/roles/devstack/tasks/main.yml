@@ -1,0 +1,61 @@
+---
+- name: Clone DevStack (git module tự bỏ qua nếu đã có, không update code cũ)
+  ansible.builtin.git:
+    repo: https://opendev.org/openstack/devstack
+    dest: /opt/stack/devstack
+    version: master
+  become: true
+  become_user: stack
+
+# plugin.sh của Trove gọi "pip_install $DEST/trove-tempest-plugin" ở bước
+# test-config KHÔNG kiểm tra tempest có bật hay không (bug), nên dù đã
+# disable_service tempest, nó vẫn cố cài và lỗi vì repo chưa được clone.
+# Clone sẵn trước khi chạy stack.sh để không phải chạy lại (chạy lại stack.sh
+# lần 2 làm hỏng Neutron/OVN — xem README, mục "Điều đã biết").
+# KHÔNG dùng depth (shallow clone): pip cài package này cần "pbr" tính version
+# qua git tag (git describe); shallow clone qua module git của Ansible không
+# fetch tag kèm theo, làm pbr lỗi "Versioning for this project requires ...
+# access to an upstream git repository". `git clone --depth 1` ở dòng lệnh
+# thường vẫn fetch tag nên không gặp lỗi này — đây là khác biệt hành vi giữa
+# 2 cách clone, không phải bug của trove-tempest-plugin.
+- name: Clone trove-tempest-plugin (né bug plugin.sh của Trove)
+  ansible.builtin.git:
+    repo: https://opendev.org/openstack/trove-tempest-plugin
+    dest: /opt/stack/trove-tempest-plugin
+  become: true
+  become_user: stack
+
+- name: Sinh local.conf từ template
+  ansible.builtin.template:
+    src: local.conf.j2
+    dest: /opt/stack/devstack/local.conf
+    owner: stack
+    group: stack
+    mode: '0644'
+  become: true
+
+- name: Copy local.sh (script sửa mạng, stack.sh tự chạy ở cuối)
+  ansible.builtin.copy:
+    src: local.sh
+    dest: /opt/stack/devstack/local.sh
+    owner: stack
+    group: stack
+    mode: '0755'
+  become: true
+
+# async/poll:0 là cách Ansible xử lý "chạy nền, không chờ" — thay cho kiểu
+# "nohup ... &" trong bash. stack.sh mất 30-45 phút, poll:0 trả kết quả ngay,
+# không phải giữ kết nối SSH mở suốt quá trình cài.
+- name: Chạy stack.sh (fire-and-forget)
+  ansible.builtin.shell: cd /opt/stack/devstack && ./stack.sh > /opt/stack/stack-run.log 2>&1
+  become: true
+  become_user: stack
+  async: 5400
+  poll: 0
+  register: stack_job
+
+- name: Hướng dẫn theo dõi tiến trình cài
+  ansible.builtin.debug:
+    msg: >-
+      Đang cài DevStack trên {{ ansible_host | default(inventory_hostname) }}.
+      Theo dõi: ssh {{ ansible_user | default('ubuntu') }}@{{ ansible_host | default(inventory_hostname) }} tail -f /opt/stack/stack-run.log

@@ -1,0 +1,18 @@
+#cloud-config
+hostname: devstack
+password: ubuntu
+chpasswd: { expire: false }
+ssh_pwauth: true
+ssh_authorized_keys:
+  - __SSHKEY__
+swap:
+  filename: /swapfile
+  size: 8G
+package_update: true
+packages: [git, qemu-guest-agent]
+runcmd:
+  # Chỉ chuẩn bị user "stack" (DevStack chạy bằng user này, không chạy bằng root).
+  # KHÔNG clone DevStack hay chạy stack.sh ở đây — cài bằng Ansible (../ansible).
+  - useradd -s /bin/bash -d /opt/stack -m stack
+  - chmod +x /opt/stack
+  - echo "stack ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/stack

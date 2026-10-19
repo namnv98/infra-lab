@@ -1,0 +1,25 @@
+# Mật khẩu admin cho Keystone/Horizon (chỉ dùng cho môi trường lab)
+admin_password: admin
+
+devstack_plugins:
+  # Trove: Database as a Service (tạo/quản lý DB như MySQL, PostgreSQL trên VM)
+  - name: trove
+    url: https://opendev.org/openstack/trove
+  # Giao diện quản lý Trove trên Horizon
+  - name: trove-dashboard
+    url: https://opendev.org/openstack/trove-dashboard
+  # Neutron FWaaS: Firewall as a Service (firewall cho router/port)
+  - name: neutron-fwaas
+    url: https://opendev.org/openstack/neutron-fwaas
+  # Giao diện quản lý firewall trên Horizon
+  - name: neutron-fwaas-dashboard
+    url: https://opendev.org/openstack/neutron-fwaas-dashboard
+  # Skyline: dashboard thế hệ mới thay cho Horizon (phần API server)
+  - name: skyline-apiserver
+    url: https://opendev.org/openstack/skyline-apiserver
+  # Octavia: Load Balancer as a Service. Tự build image "Amphora" (VM chạy HAProxy, do Octavia quản lý)
+  - name: octavia
+    url: https://opendev.org/openstack/octavia
+  # Giao diện quản lý Load Balancer trên Horizon
+  - name: octavia-dashboard
+    url: https://opendev.org/openstack/octavia-dashboard

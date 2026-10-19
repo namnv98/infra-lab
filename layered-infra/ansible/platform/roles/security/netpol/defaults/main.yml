@@ -4,7 +4,7 @@
 netpol_namespaces:
   default:            { deny_all: true }   # không chạy app
   gateway:            { deny_all: true }   # chỉ chứa object Gateway; Envoy chạy trong kube-system
-  kube-bench:         { deny_all: true }   # job chấm điểm đọc file trên node, không cần mạng
+  kube-bench:         {}                   # job chấm điểm đọc file trên node; cần DNS + apiserver (lấy phiên bản K8s) — chặn hết thì treo
   local-path-storage: {}
   cert-manager:       { webhook: true }
   kyverno:            { webhook: true }

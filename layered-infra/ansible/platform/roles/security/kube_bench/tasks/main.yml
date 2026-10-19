@@ -28,6 +28,7 @@
     namespace: kube-bench
     name: "kube-bench-{{ item }}"
     wait: true
+    delete_options: { propagationPolicy: Foreground }   # xoá cả pod của Job (mặc định của Job qua API: bỏ pod mồ côi)
   loop: [master, node]
 
 - name: Chạy kube-bench (master trên control-plane, node trên worker)

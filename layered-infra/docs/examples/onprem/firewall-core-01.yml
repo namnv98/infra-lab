@@ -24,7 +24,7 @@ opn_rules:
   - { sequence: "120", interface: lan, action: pass,  protocol: ICMP,    source_net: lan, destination_net: any,                                      description: "LAN → ICMP (ping để debug)" }
   - { sequence: "130", interface: lan, action: pass,  protocol: TCP,     source_net: lan, destination_net: "{{ zones.dmz.cidr }}", destination_port: admin_ports, description: "LAN → DMZ quản trị (22,80,443)" }
   - { sequence: "140", interface: lan, action: pass,  protocol: TCP,     source_net: svc_hosts, destination_net: any, destination_port: web_ports,   description: "infra-01 → Internet 80/443 (Harbor, Squid)" }
-  - { sequence: "150", interface: lan, action: pass,  protocol: TCP,     source_net: lan, destination_net: any,       destination_port: web_ports,   description: "TẠM: LAN → Internet 80/443", enabled: "{{ '1' if egress_temp_open else '0' }}" }
+  - { sequence: "150", interface: lan, action: pass,  protocol: TCP,     source_net: lan, destination_net: any,       destination_port: web_ports,   description: "TẠM: LAN → Internet 80/443", enabled: "{{ '1' if egress_temp_open | bool else '0' }}" }
   - { sequence: "160", interface: lan, action: pass,  protocol: TCP/UDP, source_net: lan, destination_net: mon_host, destination_port: syslog_ports, description: "LAN → siem-01 syslog" }
   - { sequence: "165", interface: lan, action: pass,  protocol: TCP,     source_net: lan, destination_net: mon_host, destination_port: wazuh_ports, description: "LAN → Wazuh manager" }
   - { sequence: "190", interface: lan, action: block, protocol: any,     source_net: lan, destination_net: any,       log: "1",                      description: "LAN → mọi nơi khác: CHẶN (ghi log)" }

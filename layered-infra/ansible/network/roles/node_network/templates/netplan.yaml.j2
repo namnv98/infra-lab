@@ -1,6 +1,7 @@
 # Do Ansible quản lý (role node_network, team network). cloud-init không còn ghi đè file này.
 {% if node_network_mode == 'static' %}
-# On-prem: IP tĩnh từ hosts.yml, gateway = firewall của VLAN ({{ zones[node_zone].gateway }}), DNS = Unbound của OPNsense.
+# On-prem: IP tĩnh từ hosts.yml, gateway = firewall của VLAN ({{ zone_fw }}), route tĩnh extra_routes thay route VPC,
+# DNS = Unbound của OPNsense.
 {% else %}
 # GCP: IP và route vẫn lấy qua DHCP của VPC (route 0.0.0.0/0 của VPC đã trỏ vào OPNsense),
 # chỉ thay DNS bằng Unbound của OPNsense {{ zone_fw }} (thay DNS của Google 169.254.169.254).
@@ -12,7 +13,11 @@ network:
 {% if node_network_mode == 'static' %}
       dhcp4: false
       addresses: [{{ ansible_host }}/{{ zones[node_zone].cidr.split('/')[1] }}]
-      routes: [{ to: default, via: {{ zones[node_zone].gateway }} }]
+      routes:
+        - { to: default, via: {{ zones[node_zone].fw | default(zones[node_zone].gateway) }} }
+{% for r in extra_routes | default([]) if r.in == node_zone %}
+        - { to: {{ zones[r.to].cidr }}, via: {{ (hostvars[r.via].nics | selectattr('zone', 'eq', node_zone) | first).ip }} }   # {{ r.name }}
+{% endfor %}
       mtu: {{ lab_mtu | default(1500) }}
 {% else %}
       dhcp4: true

@@ -23,12 +23,13 @@ case "${1:-}" in
   fw-config)
     # Config bootstrap của OPNsense sinh từ cấu hình mặc định của đúng phiên bản + hosts.yml + IP public hiện tại của máy admin
     # (luật BOOTSTRAP chỉ cho IP này gọi API biên qua WAN; Ansible xoá luật khi VPN đã chạy). Máy admin khác: ADMIN_IP=… ./lab.sh fw-config
+    # hosts.yml có admin_public_ip (vd. máy nhà: IP của máy này trên lab-wan) thì dùng luôn, không dò IP public
     F="$OUT/factory-config-26.7.xml"   # khuôn config OPNsense (cache, mất thì tự tải lại)
     command -v wg >/dev/null || { echo "!! cần wireguard-tools (lệnh wg) để sinh khoá VPN của máy admin"; exit 1; }
     [ -s "$OUT/wg-admin.key" ] || (umask 077; wg genkey > "$OUT/wg-admin.key"; wg pubkey < "$OUT/wg-admin.key" > "$OUT/wg-admin.pub")
     [ -s "$F" ] || curl -fsSL -o "$F" https://raw.githubusercontent.com/opnsense/core/26.7/src/etc/config.xml.sample
     python3 -I "$LAB/scripts/inventory.py" check || exit 1   # hosts.yml sai (IP ngoài dải, trùng, quá số card) → dừng
-    ADMIN_IP=${ADMIN_IP:-$(curl -fsS https://api.ipify.org)}
+    ADMIN_IP=${ADMIN_IP:-$($INV admin_ip)}; ADMIN_IP=${ADMIN_IP:-$(curl -fsS https://api.ipify.org)}
     for R in edge core; do python3 -I "$LAB/scripts/opnsense-bootstrap.py" "$F" "$OUT" "$ADMIN_IP" $R; done
     echo "Nạp 2 file trên vào firewall (GCP: make provision · máy dựng tay: USB /conf/config.xml hoặc console), rồi: make bootstrap" ;;
   fw-bootstrap)

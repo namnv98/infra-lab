@@ -1,11 +1,12 @@
 # Cửa vào chuẩn của dự án: `make <lệnh>`. Không quan tâm máy chạy ở đâu: mọi IP ở ansible/shared/inventory/hosts.yml.
 # 2 lớp tách rời:
-#   [tạo máy]   make provision — tuỳ chọn, bộ tạo máy ở provision/<nền tảng>/ (đang có: gcp); không có thì tự tạo máy đúng hosts.yml
+#   [tạo máy]   make provision — tuỳ chọn, bộ tạo máy ở provision/<nền tảng>/ (đang có: gcp, libvirt); không có thì tự tạo máy đúng hosts.yml
 #   [cấu hình]  make fw-config → (nạp vào firewall) → make bootstrap → make cluster → make test — chỉ đọc hosts.yml
 # Gõ `make` (hoặc `make help`) để xem danh sách.
 .DEFAULT_GOAL := help
-# Bộ tạo máy: thư mục provision/<tên>/ có provision.mk (xoá thư mục đó = không còn bộ tạo máy, tự tạo máy bằng cách khác)
-PROVISIONER ?= $(notdir $(patsubst %/,%,$(dir $(firstword $(wildcard provision/*/provision.mk)))))
+# Bộ tạo máy: thư mục provision/<tên>/ có provision.mk (xoá thư mục đó = không còn bộ tạo máy, tự tạo máy bằng cách khác).
+# Chọn theo lab_provisioner trong provisioned.yml (make libvirt-use chép vào); không ghi thì lấy thư mục đầu tiên (gcp)
+PROVISIONER ?= $(or $(shell sed -n 's/^ *lab_provisioner: *\([a-z0-9_-]*\).*/\1/p' ansible/shared/inventory/provisioned.yml 2>/dev/null),$(notdir $(patsubst %/,%,$(dir $(firstword $(wildcard provision/*/provision.mk))))))
 TEAMS := network platform observability   # ansible/<team>/site.yml — mỗi team một thư mục, chung hợp đồng ansible/shared/
 .PHONY: help all fw-config provision bootstrap cluster test lint fmt validate vpn tunnel $(TEAMS)
 

@@ -80,6 +80,27 @@
   when: rule_add is changed or rule_set is changed or rule_toggle is changed or rule_del is changed or dnat_add is changed
 
 # ---------- DNS nội bộ (Unbound) ----------
+# Upstream trả lời chậm/mất vài gói (đường ra nghẽn lúc tải image, luật đang đổi) → Unbound đánh dấu "chết" 15 phút và trả
+# SERVFAIL dù đường đã thông. Vẫn hỏi thử upstream bị đánh dấu (keep-probing) + chỉ nhớ 60 giây: hết lỗi là tự phân giải lại
+- name: Cài đặt Unbound đang có
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/unbound/settings/get", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: unbound_get
+
+- name: "Unbound: luôn hỏi thử upstream bị đánh dấu chết, nhớ 60 giây"
+  ansible.builtin.uri:
+    url: "{{ opnsense_url }}/api/unbound/settings/set"
+    method: POST
+    user: "{{ opn_key }}"
+    password: "{{ opn_secret }}"
+    force_basic_auth: true
+    validate_certs: false
+    body_format: json
+    body: { unbound: { advanced: { infrakeepprobing: "1", infrahostttl: "60" } } }
+  when: unbound_get.json.unbound.advanced.infrakeepprobing != "1" or unbound_get.json.unbound.advanced.infrahostttl != "60"
+  register: unbound_adv
+  changed_when: true
+  failed_when: unbound_adv.json.result | default('') != 'saved'
+
 # Chỉ core giữ tên nội bộ: biên (phục vụ DMZ) không biết tên nào trong lab.internal → DMZ không dò được mạng trong
 - name: Host override đang có
   ansible.builtin.uri: { url: "{{ opnsense_url }}/api/unbound/settings/search_host_override", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
@@ -106,7 +127,7 @@
 
 - name: Áp dụng DNS
   ansible.builtin.uri: { url: "{{ opnsense_url }}/api/unbound/service/reconfigure", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
-  when: ovr_add is changed
+  when: ovr_add is changed or unbound_adv is changed
 
 # Unbound từ chối cấu hình sai (vd. hostname "*") bằng cách DỪNG HẲN → DNS cả lab chết. Kiểm tra ngay, lỗi thì dừng playbook.
 - name: Unbound phải còn chạy sau khi áp dụng
@@ -115,7 +136,7 @@
   retries: 10
   delay: 3
   until: unbound_status.json.status | default('') == 'running'
-  when: ovr_add is changed
+  when: ovr_add is changed or unbound_adv is changed
 
 # ---------- Gửi syslog về siem-01 (VLAN MGMT) ----------
 - name: Đích syslog đang có
@@ -165,3 +186,26 @@
 - name: Áp dụng sau khi xoá luật bootstrap
   ansible.builtin.uri: { url: "{{ opnsense_url }}/api/firewall/filter/apply", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
   when: boot_del is changed
+
+# ---------- DNS core sau khi luật 2 firewall đã áp xong ----------
+# Unbound của core đệ quy ra Internet xuyên biên. Lúc luật biên đang đổi, truy vấn bị chặn → Unbound đánh dấu upstream
+# "chết" trong infra cache (~15 phút) và trả SERVFAIL cho mọi tên ngoài dù đường đã thông. Đổi luật thì khởi động lại
+# Unbound trên core ở cuối play (chiến lược linear: mọi task trước đó đã xong trên cả 2 firewall).
+- name: Ghi nhận firewall này có đổi luật/NAT trong lần chạy này không
+  ansible.builtin.set_fact:
+    opn_rules_changed: "{{ rule_add is changed or rule_set is changed or rule_del is changed or rule_toggle is changed
+                           or snat_add is changed or boot_del is changed }}"
+
+- name: "Core: khởi động lại Unbound (quên upstream bị đánh dấu chết khi luật đang đổi)"
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/unbound/service/restart", method: POST, user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false, body_format: json, body: {} }
+  when: opn_role == 'core' and (groups['firewalls'] | map('extract', hostvars, 'opn_rules_changed') | select | list | length > 0)
+  register: unbound_restart
+  changed_when: true
+
+- name: "Core: Unbound chạy lại sau khi khởi động lại"
+  ansible.builtin.uri: { url: "{{ opnsense_url }}/api/unbound/service/status", user: "{{ opn_key }}", password: "{{ opn_secret }}", force_basic_auth: true, validate_certs: false }
+  register: unbound_after
+  retries: 10
+  delay: 3
+  until: unbound_after.json.status | default('') == 'running'
+  when: unbound_restart is changed

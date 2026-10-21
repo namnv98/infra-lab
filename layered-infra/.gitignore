@@ -5,6 +5,8 @@ provision/**/*.tfstate.*
 provision/**/*.tfplan
 # bí mật, kubeconfig, log (out/)
 out/
+# out/ của môi trường khác (make libvirt-use cất)
+out-*/
 # IP do bộ tạo máy ghi ra (vd. IP public GCP) — đổi mỗi lần dựng lại
 ansible/shared/inventory/provisioned.yml
 ansible/.ansible/   # cache của ansible-lint/collection

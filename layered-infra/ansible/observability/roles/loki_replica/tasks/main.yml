@@ -37,6 +37,15 @@
 - name: Bật luật firewall
   ansible.builtin.systemd_service: { name: log-archive-fw, enabled: true, state: started, daemon_reload: "{{ fw_unit is changed }}" }
 
+- name: Kéo image qua Harbor (thử lại khi mạng chập chờn)
+  ansible.builtin.command: docker compose pull --quiet
+  args: { chdir: /opt/log-archive }
+  register: pull
+  until: pull.rc == 0
+  retries: 5
+  delay: 15
+  changed_when: false
+
 - name: Chạy Loki bản sao
   ansible.builtin.command: "docker compose up -d {{ '--force-recreate' if cfg is changed else '' }}"
   args: { chdir: /opt/log-archive }

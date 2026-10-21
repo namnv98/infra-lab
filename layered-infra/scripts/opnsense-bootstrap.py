@@ -14,7 +14,7 @@ Hai vai:
 
 Dùng: opnsense-bootstrap.py <factory-config.xml> <out-dir> <admin-public-ip> <edge|core>
 """
-import secrets, string, subprocess, sys, uuid, pathlib
+import ipaddress, secrets, string, subprocess, sys, uuid, pathlib
 import xml.etree.ElementTree as ET
 
 factory, outdir, admin_ip, role = sys.argv[1], pathlib.Path(sys.argv[2]), sys.argv[3], sys.argv[4]
@@ -42,9 +42,10 @@ if GCP:
     RT += [(P["zones"][r["to"]]["cidr"], f"{r['in'].upper()}_GW", "Vào trong qua firewall core (route VPC lab-dmz → core)")
            for r in P["extra_routes"] if r["in"] in my_nic and r["via"] != fw_name]
 else:
-    # On-prem: ARP thật, firewall là gateway của VLAN → chỉ cần gateway mặc định + gateway sang firewall kia (qua transit)
+    # On-prem: ARP thật, firewall là gateway của VLAN → chỉ cần gateway mặc định + gateway sang firewall kia.
+    # Gateway mặc định = card firewall kia trong vùng uplink (core: card DMZ của biên), vùng không có fw (wan) thì gateway của vùng
     up = next(n for n in FW["nics"] if n.get("default_gw"))
-    GW.append((f"{up['zone'].upper()}_GW", up["if"], P["zones"][up["zone"]]["gateway"], True, False))
+    GW.append((f"{up['zone'].upper()}_GW", up["if"], invlib.gateway(P, up["zone"]), True, False))
     for r in P["extra_routes"]:
         if r["in"] in my_nic and r["via"] != fw_name:
             gname = r["via"].split("-")[1].upper() + "_GW"      # vd. firewall-core-01 → CORE_GW
@@ -111,6 +112,10 @@ sub(s, "dnsserver", R["dns"])
 sub(s.find("webgui"), "noantilockout", "1")
 sub(s, "primaryconsole", "serial")  # bản nano: console nối tiếp (GCP serial port / IPMI SOL)
 sub(s, "serialspeed", "115200")
+# On-prem, core: gateway của card ngoài là biên, nhưng máy DMZ (edge-01) nằm cùng dải → trả lời phải đi thẳng tới máy đó.
+# reply-to (mặc định trên card có gateway) đẩy trả lời về biên → biên không có state → chặn. GCP: .1 của VPC tự chuyển đúng
+if role == "core" and not GCP:
+    sub(s, "disablereplyto", "yes")
 u = s.find("user")
 sub(u, "password", crypt6(root_pw))
 sub(u, "apikeys", f"{api_key}|{crypt6(api_secret)}")
@@ -133,7 +138,10 @@ for name, nic, ip, descr, prefix in ZONES:
         sub(e, "descr", descr)
     if name == "wan":
         sub(e, "gateway", next(g[0] for g in GW if g[3]))   # gateway mặc định gắn trên card "wan" (biên: Internet; core: về biên)
-        if role == "core":         # card ngoài của core nằm trong mạng nội bộ (DMZ) → không chặn dải private/bogon
+        # card ngoài nằm trong dải private → không chặn private/bogon: core (card ngoài ở DMZ/transit), biên on-prem sau NAT
+        # của nhà mạng/libvirt (máy admin + VPN tới từ dải private). GCP giữ chặn: Internet tới bằng IP public thật
+        wan_cidr = P["zones"][next(n["zone"] for n in FW["nics"] if n["if"] == "wan")]["cidr"]
+        if role == "core" or (not GCP and ipaddress.ip_network(wan_cidr).is_private):
             for t in ("blockpriv", "blockbogons"):
                 c = e.find(t)
                 if c is not None:

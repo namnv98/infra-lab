@@ -15,12 +15,23 @@ Dùng như thư viện (opnsense-bootstrap.py, gcp.sh) hoặc lệnh cho shell (
   inventory.py get ssh_hosts         "tên IP" từng VM Linux (lab.sh sinh out/ssh_config)
   inventory.py get fw_gui            GUI của các firewall (card mặc định của từng vùng có fw), cách nhau bởi dấu cách
   inventory.py get public_web|public_vpn  IP public của firewall biên: web (80/443) · VPN (Endpoint WireGuard)
+  inventory.py get admin_ip          IP máy admin như firewall biên thấy (admin_public_ip; trống = tự dò IP public)
+  inventory.py get zone_list         "vùng dải gateway" từng vùng (bộ tạo máy dựng mạng)
+  inventory.py get vm_list           "tên fw|linux vCPU RAM(MiB) đĩa(GB) vùng,… IP,…" từng máy (vcpus/ram_mb/disk_gb)
+  inventory.py get host_net <tên>    "IP/prefix gateway DNS" của 1 VM Linux (cloud-init lần boot đầu)
+  inventory.py get zone_fw <vùng>    card firewall của vùng (gateway của máy on-prem, DNS/NTP của máy trong vùng)
+  inventory.py get host_routes <tên> "dải qua" từng route extra_routes của vùng máy đó (on-prem: route tĩnh trên máy)
+  inventory.py get fw_role <tên>     vai của firewall: edge | core
+  inventory.py get lab_image_dir     thư mục image OS gốc của bộ tạo máy (lab_image_dir)
+  inventory.py get mtu|node_interface
 """
-import ipaddress, pathlib, sys
+import ipaddress, os, pathlib, sys
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 INV = ROOT / "ansible" / "shared" / "inventory" / "hosts.yml"
+# LAB_PROVISIONED: gộp 1 file khác thay provisioned.yml (vd. bộ tạo máy nhà dọn máy khi ansible/ đang dùng GCP)
+PROV = pathlib.Path(os.environ.get("LAB_PROVISIONED") or INV.with_name("provisioned.yml"))
 VCPU = {"e2-micro": 2, "e2-small": 2, "e2-medium": 2, "e2-standard-2": 2, "e2-highcpu-4": 4, "e2-standard-4": 4}
 
 
@@ -36,21 +47,23 @@ def load():
     """hosts.yml (+ provisioned.yml) → dict gọn cho script: zones, firewalls, hosts, k8s, vpn, mtu, domain, public…"""
     inv = yaml.safe_load(INV.read_text())["all"]
     v = dict(inv.get("vars") or {})
-    prov = INV.with_name("provisioned.yml")
-    if prov.exists():
-        v.update(((yaml.safe_load(prov.read_text()) or {}).get("all") or {}).get("vars") or {})
+    if PROV.exists():
+        v.update(((yaml.safe_load(PROV.read_text()) or {}).get("all") or {}).get("vars") or {})
     p = {"platform": v.get("lab_hosting", "gcp"), "domain": v["lab_domain"], "mtu": v.get("lab_mtu", 1500),
          "node": {"interface": v.get("node_interface"), "network": v.get("node_network_mode"), "ntp": v.get("ntp_client")},
          "zones": v["zones"], "extra_routes": v.get("extra_routes", []), "vpn": v["vpn"],
          "k8s": {"api_vip": v["api_vip"], "gateways": v["gateways"], "metallb_pools": v.get("metallb_pools", {})},
          "public": {k: v[f] for k, f in (("web", "fw_public_ip"), ("vpn", "vpn_public_ip")) if v.get(f)},
+         "admin_ip": v.get("admin_public_ip"), "image_dir": v.get("lab_image_dir", ""),
          "firewalls": {}, "hosts": {}}
     for name, h, groups in _hosts(inv):
         if "firewalls" in groups:
-            p["firewalls"][name] = {"role": h["fw_role"], "type": h.get("machine_type"), "dns": h["fw_dns"], "nics": h["nics"]}
+            p["firewalls"][name] = {"role": h["fw_role"], "type": h.get("machine_type"), "dns": h["fw_dns"], "nics": h["nics"],
+                                    "vcpus": h.get("vcpus"), "ram_mb": h.get("ram_mb"), "disk": h.get("disk_gb", 10)}
         elif "linux" in groups:
             p["hosts"][name] = {"ip": h["ansible_host"], "zone": h["zone"], "groups": groups[-1:], "type": h.get("machine_type"),
-                                "disk": h.get("disk_gb"), "alias": h.get("gcp_alias", [])}
+                                "disk": h.get("disk_gb"), "alias": h.get("gcp_alias", []),
+                                "vcpus": h.get("vcpus"), "ram_mb": h.get("ram_mb")}
     return p
 
 
@@ -61,6 +74,12 @@ def host_in_group(p, group):
 def nic(p, fw, zone):
     """IP card của firewall `fw` trong vùng `zone`."""
     return next(n["ip"] for n in p["firewalls"][fw]["nics"] if n["zone"] == zone)
+
+
+def gateway(p, zone):
+    """Gateway mặc định của máy trong vùng: GCP = .1 của VPC · on-prem = card firewall của vùng (không có router .1)."""
+    z = p["zones"][zone]
+    return z["gateway"] if p["platform"] == "gcp" else z.get("fw", z["gateway"])
 
 
 def halves(cidr):
@@ -101,8 +120,6 @@ def check(p):
     for z, v in p["zones"].items():
         if gcp and ipaddress.ip_address(v["gateway"]) != zones[z].network_address + 1:
             errs.append(f"vùng {z}: gateway {v['gateway']} phải là .1 (GCP)")
-        if not gcp and "fw" in v and v["fw"] != v["gateway"]:
-            errs.append(f"vùng {z}: on-prem thì firewall ({v['fw']}) chính là gateway ({v['gateway']})")
     for fw, f in p["firewalls"].items():
         if gcp and len(f["nics"]) > VCPU.get(f["type"], 0):
             errs.append(f"{fw}: {len(f['nics'])} card > {VCPU.get(f['type'])} vCPU của {f['type']}")
@@ -174,9 +191,37 @@ def get(p, key, *args):
         ip = p.get("public", {}).get(key.split("_")[1])
         if not ip:
             sys.exit(f"thiếu IP public ({key}): bộ tạo máy (make provision) ghi vào "
-                     f"{INV.with_name('provisioned.yml').relative_to(ROOT)}, máy có sẵn thì ghi tay fw_public_ip/vpn_public_ip vào "
+                     f"{PROV.relative_to(ROOT)}, máy có sẵn thì ghi tay fw_public_ip/vpn_public_ip vào "
                      f"{INV.relative_to(ROOT)}")
         return ip
+    if key == "admin_ip":
+        return p.get("admin_ip") or ""
+    if key == "zone_list":
+        return "\n".join(f"{z} {v['cidr']} {v['gateway']}" for z, v in p["zones"].items())
+    if key == "vm_list":   # bộ tạo máy cần vcpus/ram_mb ghi trong hosts.yml (GCP dùng machine_type thay thế)
+        rows = [(n, "fw", f, [x["zone"] for x in f["nics"]], [x["ip"] for x in f["nics"]]) for n, f in p["firewalls"].items()]
+        rows += [(n, "linux", h, [h["zone"]], [h["ip"]]) for n, h in p["hosts"].items()]
+        for n, _, h, _, _ in rows:
+            if not (h.get("vcpus") and h.get("ram_mb") and h.get("disk")):
+                sys.exit(f"{n}: thiếu vcpus / ram_mb / disk_gb trong {INV.relative_to(ROOT)}")
+        return "\n".join(f"{n} {k} {h['vcpus']} {h['ram_mb']} {h['disk']} {','.join(z)} {','.join(i)}" for n, k, h, z, i in rows)
+    if key == "host_net":
+        h = p["hosts"][args[0]]
+        z = p["zones"][h["zone"]]
+        return f"{h['ip']}/{z['cidr'].split('/')[1]} {gateway(p, h['zone'])} {z.get('fw', z['gateway'])}"
+    if key == "zone_fw":
+        return p["zones"][args[0]]["fw"]
+    if key == "host_routes":
+        zone = p["hosts"][args[0]]["zone"]
+        return "\n".join(f"{p['zones'][r['to']]['cidr']} {nic(p, r['via'], zone)}" for r in p["extra_routes"] if r["in"] == zone)
+    if key == "lab_image_dir":
+        return p["image_dir"]
+    if key == "fw_role":
+        return p["firewalls"][args[0]]["role"]
+    if key == "mtu":
+        return p["mtu"]
+    if key == "node_interface":
+        return p["node"]["interface"]
     sys.exit(f"không biết khoá: {key}")
 
 
@@ -184,7 +229,7 @@ if __name__ == "__main__":
     p = load()
     if sys.argv[1:2] == ["check"]:
         e = check(p)
-        print("\n".join(e) if e else f"OK: {INV.relative_to(ROOT)} hợp lệ")
+        print("\n".join(e) if e else f"OK: {INV} hợp lệ")
         sys.exit(1 if e else 0)
     if sys.argv[1:2] == ["get"]:
         print(get(p, *sys.argv[2:]))

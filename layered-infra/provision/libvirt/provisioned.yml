@@ -1,0 +1,17 @@
+# Phần RIÊNG của máy nhà (KVM/libvirt) — `make libvirt-use` chép file này thành ansible/shared/inventory/provisioned.yml,
+# gộp đè lên vars của hosts.yml. Vùng, IP, máy, luật firewall: dùng chung hosts.yml với GCP, không khai lại ở đây.
+# "Internet" của lab = mạng NAT lab-wan của libvirt (10.99.0.0/24, như vùng wan): máy này là 10.99.0.1.
+all:
+  vars:
+    lab_provisioner: libvirt          # make provision → provision/libvirt/ (Makefile đọc khoá này)
+    lab_hosting: onprem               # không có router .1 của VPC: máy trỏ thẳng vào firewall (fw) của vùng, ARP thật
+    node_network_mode: static         # không có DHCP: cloud-init đặt IP tĩnh lần boot đầu, Ansible (node_network) ghi lại y hệt
+    ntp_client: systemd-timesyncd     # Ubuntu cloud image (bản generic) dùng timesyncd
+
+    # IP "public" của biên trên lab-wan (máy này tới thẳng). VPN có IP riêng như GCP: Virtual IP trên WAN của biên
+    fw_public_ip: 10.99.0.2
+    vpn_public_ip: 10.99.0.3
+    # Firewall biên thấy máy admin là IP của máy này trên lab-wan (luật BOOTSTRAP, kiểm thử "IP thật của client")
+    admin_public_ip: 10.99.0.1
+    # Image OS gốc (OPNsense nano, Ubuntu cloud image) — tải 1 lần, down/purge không xoá, dựng lại không tải lại
+    lab_image_dir: /data/lab-images

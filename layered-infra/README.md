@@ -8,7 +8,7 @@ registry, proxy, SIEM đều tự host. Mục tiêu: luyện đúng mô hình s�
 |-------------|---------------------------------------------------------------------------------------------------|
 | Project GCP | `ultra-evening-511813-t2` (Free Trial, credit hết hạn 23/12/2026)                                 |
 | Vùng        | `asia-southeast1-a`                                                                               |
-| Tạo máy     | Tách rời, tuỳ chọn: GCP = OpenTofu `provision/gcp/` (xoá được); nơi khác = tự tạo đúng `hosts.yml` |
+| Tạo máy     | Tách rời, tuỳ chọn: GCP = OpenTofu `provision/gcp/` · máy nhà = libvirt `provision/libvirt/` · nơi khác = tự tạo đúng `hosts.yml` |
 | Firewall    | OPNsense 26.7 (golden image = bản nano gốc của hãng)                                              |
 | Quản trị    | VPN WireGuard trên OPNsense → chỉ tới **jump server** jump-01; mọi SSH/kubectl/GUI đi qua jump-01 |
 | Kubernetes  | v1.37.1 kubeadm, Cilium 1.20.2, kube-vip, MetalLB, Gateway API, cert-manager                      |
@@ -69,8 +69,9 @@ layered-infra/
 ├── Makefile          # cửa vào chuẩn: fw-config · provision · bootstrap · cluster · test · network/platform/observability
 ├── lab.sh            # LỚP CẤU HÌNH: fw-config, fw-bootstrap, vpn, ssh, tunnel, browser, cluster — chỉ đọc inventory hosts.yml
 ├── provision/        # LỚP TẠO MÁY — tuỳ chọn, mỗi nền tảng 1 thư mục, xoá đi lớp cấu hình vẫn chạy
-│   └── gcp/          # OpenTofu (main.tf + modules/{network,firewall,vm}) · gcp.sh (up, image, console, stop/start, down, cost)
-│                     #   · fw-load-config.py (nạp config bootstrap qua serial console) · build-opnsense-image.sh · provision.mk
+│   ├── gcp/          # OpenTofu (main.tf + modules/{network,firewall,vm}) · gcp.sh (up, image, console, stop/start, down, cost)
+│   │                 #   · fw-load-config.py (nạp config bootstrap qua serial console) · build-opnsense-image.sh · provision.mk
+│   └── libvirt/      # máy nhà (KVM): libvirt.sh (use/restore, image, up, console, stop/start, down) · provisioned.yml (IP public + biến riêng) · provision.mk
 ├── scripts/
 │   ├── inventory.py              # đọc/kiểm tra inventory hosts.yml (+ provisioned.yml) cho lab.sh, smoke.sh, gcp.sh, bootstrap OPNsense
 │   ├── opnsense-bootstrap.py     # sinh config.xml bootstrap từ config mặc định của hãng
@@ -107,6 +108,9 @@ make cluster            # network → platform (K8s, Harbor, app) → nạp cach
 make test               # kiểm thử đầu-cuối (~2 phút): 33 kiểm thử, thoát lỗi nếu có kiểm thử không đạt (./test/smoke.sh prod: chỉ 1 nhóm)
 make gcp-stop           # [GCP] TẮT cả lab, giữ cấu hình (~0,07 USD/giờ thay vì ~0,33) · make gcp-start: bật lại theo tầng (~5 phút)
 ```
+
+**Máy nhà (KVM/libvirt)**: `make libvirt-use fw-config provision bootstrap cluster test` — xem `provision/libvirt/README.md`
+(~20GB RAM, 8 VM, cùng IP với GCP — chỉ khác IP public; quay lại GCP: `make libvirt-restore`, không đổi file nào trong git).
 
 **Chuyển sang máy tự tạo / on-prem**: sửa `ansible/shared/inventory/hosts.yml` (IP, card, vùng, `node_*`, IP public) và luật
 firewall `ansible/network/host_vars/firewall-*.yml` nếu topology đổi — ví dụ đầy đủ ở `docs/examples/onprem/` — rồi

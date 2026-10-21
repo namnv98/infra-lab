@@ -39,7 +39,7 @@ if want web; then  # Internet → firewall biên → HAProxy + WAF → Gateway �
   check web "WAF chặn đọc file (LFI)"           403 "$(code "${C[@]}" "https://$APP/?f=../../../../etc/passwd")"
   check web "WAF chặn công cụ quét (sqlmap)"    403 "$(code "${C[@]}" -A sqlmap/1.8 "https://$APP/")"
   check web "HTTP chuyển sang HTTPS"            301 "$(code "http://$WEB_IP/")"
-  ME=$(curl -s --max-time 10 https://api.ipify.org)
+  ME=$($INV admin_ip); ME=${ME:-$(curl -s --max-time 10 https://api.ipify.org)}   # máy nhà: biên thấy IP trên lab-wan
   RIP=$(curl -s --max-time 10 "${C[@]}" "https://$APP/" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-real-ip"{print $2}')
   # mạng quán/văn phòng có thể ra Internet bằng nhiều IP liền nhau → so cùng dải /24
   check web "App thấy IP thật của client (cùng /24)" "${ME%.*}" "${RIP%.*}"
@@ -60,14 +60,23 @@ if want egress; then  # đi ra Internet: chỉ infra-01 trực tiếp, máy khá
   check egress "master ra thẳng Internet bị chặn"   000 "$($SSH "$MASTER" "curl -s -o /dev/null -w %{http_code} --max-time 8 https://dl.k8s.io/" 2>/dev/null | tail -1)"
   check egress "master qua Squid, tên miền được phép" 200 "$($SSH "$MASTER" "curl -s -o /dev/null -w %{http_code} --max-time 10 -x $PROXY https://dl.k8s.io/" 2>/dev/null | tail -1)"
   check egress "master qua Squid, tên miền ngoài danh sách" 000 "$($SSH "$MASTER" "curl -s -o /dev/null -w %{http_code} --max-time 10 -x $PROXY https://example.com/" 2>/dev/null | tail -1)"
-  check egress "infra-01 ra Internet, NAT bằng IP web" "$WEB_IP" "$($SSH "$($INV group_ip infra)" "curl -s --max-time 10 https://api.ipify.org" 2>/dev/null | tail -1)"
+  # IP web là IP public (GCP): Internet thấy đúng IP đó. IP web private (máy nhà/on-prem sau NAT nhà mạng): Internet thấy
+  # IP public của đường ra chung — so với IP public máy admin đang thấy
+  case $WEB_IP in
+    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*) NAT_IP=$(curl -s --max-time 10 https://api.ipify.org); NAT_DESC="IP public đường ra (biên sau NAT)" ;;
+    *) NAT_IP=$WEB_IP; NAT_DESC="IP web" ;;
+  esac
+  check egress "infra-01 ra Internet, NAT bằng $NAT_DESC" "$NAT_IP" "$($SSH "$($INV group_ip infra)" "curl -s --max-time 10 https://api.ipify.org" 2>/dev/null | tail -1)"
 fi
 
 if want edge; then  # edge-01 (DMZ) chỉ tới Gateway public và SIEM
   EDGE=$($INV group_ip edge)
   check edge "edge-01 → master:22 bị chặn"      chặn "$(remote_tcp "$EDGE" "$MASTER" 22)"
   check edge "edge-01 → siem-01 syslog"         mở   "$(remote_tcp "$EDGE" "$SIEM" 1514)"
-  check edge "edge-01 đồng bộ giờ từ firewall"  có   "$($SSH "$EDGE" "chronyc -n sources 2>/dev/null | grep -q '^\^\*' && echo có || echo không" 2>/dev/null | tail -1)"
+  # chrony (image GCP): nguồn đang dùng (^*) · systemd-timesyncd (Ubuntu cài thường): đã đồng bộ + server là firewall biên
+  check edge "edge-01 đồng bộ giờ từ firewall"  có   "$($SSH "$EDGE" "if command -v chronyc >/dev/null; then chronyc -n sources | grep -q '^\^\*'; \
+    else [ \"\$(timedatectl show -p NTPSynchronized --value)\" = yes ] && [ \"\$(timedatectl show-timesync -p ServerAddress --value)\" = $($INV zone_fw dmz) ]; fi \
+    && echo có || echo không" 2>/dev/null | tail -1)"
 fi
 
 if want cluster; then

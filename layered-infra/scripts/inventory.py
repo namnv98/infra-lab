@@ -16,7 +16,9 @@ Dùng như thư viện (opnsense-bootstrap.py, gcp.sh) hoặc lệnh cho shell (
   inventory.py get fw_gui            GUI của các firewall (card mặc định của từng vùng có fw), cách nhau bởi dấu cách
   inventory.py get public_web|public_vpn  IP public của firewall biên: web (80/443) · VPN (Endpoint WireGuard)
   inventory.py get admin_ip          IP máy admin như firewall biên thấy (admin_public_ip; trống = tự dò IP public)
-  inventory.py get zone_list         "vùng dải gateway" từng vùng (bộ tạo máy dựng mạng)
+  inventory.py get zone_list         "vùng dải gateway vlan" từng vùng (vlan "-" nếu không có; bộ tạo máy dựng mạng)
+  inventory.py get vlan_trunk        yes | no — firewall nhận các vùng có vlan qua 1 card trunk (lab_vlan_trunk)
+  inventory.py get fw_ports <tên>    "card trunk|access vùng,… IP,…" từng card vật lý của firewall (thứ tự = vtnet0..n)
   inventory.py get vm_list           "tên fw|linux vCPU RAM(MiB) đĩa(GB) vùng,… IP,…" từng máy (vcpus/ram_mb/disk_gb)
   inventory.py get host_net <tên>    "IP/prefix gateway DNS" của 1 VM Linux (cloud-init lần boot đầu)
   inventory.py get zone_fw <vùng>    card firewall của vùng (gateway của máy on-prem, DNS/NTP của máy trong vùng)
@@ -55,6 +57,7 @@ def load():
          "k8s": {"api_vip": v["api_vip"], "gateways": v["gateways"], "metallb_pools": v.get("metallb_pools", {})},
          "public": {k: v[f] for k, f in (("web", "fw_public_ip"), ("vpn", "vpn_public_ip")) if v.get(f)},
          "admin_ip": v.get("admin_public_ip"), "image_dir": v.get("lab_image_dir", ""),
+         "vlan_trunk": bool(v.get("lab_vlan_trunk", False)),
          "firewalls": {}, "hosts": {}}
     for name, h, groups in _hosts(inv):
         if "firewalls" in groups:
@@ -74,6 +77,31 @@ def host_in_group(p, group):
 def nic(p, fw, zone):
     """IP card của firewall `fw` trong vùng `zone`."""
     return next(n["ip"] for n in p["firewalls"][fw]["nics"] if n["zone"] == zone)
+
+
+def fw_ports(p, fw):
+    """Card vật lý của firewall theo thứ tự (= vtnet0..n): [{dev, trunk, nics}]. Không trunk: mỗi nic 1 card.
+    lab_vlan_trunk: mọi nic ở vùng có vlan gom vào 1 card trunk (đặt ở vị trí nic VLAN đầu tiên), nic khác giữ card riêng."""
+    ports = []
+    for n in p["firewalls"][fw]["nics"]:
+        if p["vlan_trunk"] and p["zones"][n["zone"]].get("vlan"):
+            t = next((x for x in ports if x["trunk"]), None)
+            if t is None:
+                t = {"trunk": True, "nics": []}
+                ports.append(t)
+            t["nics"].append(n)
+        else:
+            ports.append({"trunk": False, "nics": [n]})
+    for i, x in enumerate(ports):
+        x["dev"] = x["nics"][0].get("dev", f"vtnet{i}") if not x["trunk"] else f"vtnet{i}"
+    return ports
+
+
+def nic_dev(p, fw, n):
+    """Thiết bị FreeBSD của 1 nic: card riêng (vtnet<i>) hoặc VLAN trên card trunk (vtnet<i>_vlan<tag>, cách đặt tên của OPNsense)."""
+    for x in fw_ports(p, fw):
+        if n in x["nics"]:
+            return f"{x['dev']}_vlan{p['zones'][n['zone']]['vlan']}" if x["trunk"] else x["dev"]
 
 
 def gateway(p, zone):
@@ -121,6 +149,8 @@ def check(p):
         if gcp and ipaddress.ip_address(v["gateway"]) != zones[z].network_address + 1:
             errs.append(f"vùng {z}: gateway {v['gateway']} phải là .1 (GCP)")
     for fw, f in p["firewalls"].items():
+        if p["vlan_trunk"] and gcp:
+            errs.append("lab_vlan_trunk: GCP không có VLAN (mỗi vùng 1 VPC)")
         if gcp and len(f["nics"]) > VCPU.get(f["type"], 0):
             errs.append(f"{fw}: {len(f['nics'])} card > {VCPU.get(f['type'])} vCPU của {f['type']}")
         for n in f["nics"]:
@@ -130,6 +160,9 @@ def check(p):
     for z, v in p["zones"].items():
         if "fw" in v and not any(n["ip"] == v["fw"] for f in p["firewalls"].values() for n in f["nics"]):
             errs.append(f"vùng {z}: fw {v['fw']} không phải card của firewall nào")
+    vlans = [v["vlan"] for v in p["zones"].values() if "vlan" in v]
+    if len(vlans) != len(set(vlans)) or not all(isinstance(t, int) and 1 <= t <= 4094 for t in vlans):
+        errs.append(f"vlan của các vùng phải là số 1–4094, không trùng: {vlans}")
     for n, h in p["hosts"].items():
         use(h["ip"], h["zone"], n)
         for a in h.get("alias", []):
@@ -197,7 +230,12 @@ def get(p, key, *args):
     if key == "admin_ip":
         return p.get("admin_ip") or ""
     if key == "zone_list":
-        return "\n".join(f"{z} {v['cidr']} {v['gateway']}" for z, v in p["zones"].items())
+        return "\n".join(f"{z} {v['cidr']} {v['gateway']} {v.get('vlan', '-')}" for z, v in p["zones"].items())
+    if key == "vlan_trunk":
+        return "yes" if p["vlan_trunk"] else "no"
+    if key == "fw_ports":
+        return "\n".join(f"{x['dev']} {'trunk' if x['trunk'] else 'access'} {','.join(n['zone'] for n in x['nics'])} "
+                         f"{','.join(n['ip'] for n in x['nics'])}" for x in fw_ports(p, args[0]))
     if key == "vm_list":   # bộ tạo máy cần vcpus/ram_mb ghi trong hosts.yml (GCP dùng machine_type thay thế)
         rows = [(n, "fw", f, [x["zone"] for x in f["nics"]], [x["ip"] for x in f["nics"]]) for n, f in p["firewalls"].items()]
         rows += [(n, "linux", h, [h["zone"]], [h["ip"]]) for n, h in p["hosts"].items()]

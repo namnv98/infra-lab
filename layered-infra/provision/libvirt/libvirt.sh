@@ -31,6 +31,12 @@ FILES=(ansible/shared/inventory/provisioned.yml)   # phần riêng của 1 môi 
 V() { LC_ALL=C virsh -c qemu:///system "$@"; }   # LC_ALL=C: grep chữ tiếng Anh (running, shut off)
 exists() { V dominfo "$1" >/dev/null 2>&1; }
 net() { echo "lab-$1"; }                                   # tên mạng libvirt = tên bridge (≤ 15 ký tự)
+SW=lab-sw                                                  # switch Open vSwitch khi lab_vlan_trunk: mỗi vùng 1 VLAN
+TRUNK=$($INV vlan_trunk)
+declare -A VLAN; while read -r Z _ _ T; do VLAN[$Z]=$T; done < <($INV zone_list)
+on_sw() { [ "$TRUNK" = yes ] && [ "${VLAN[$1]}" != - ]; }  # vùng này nằm trên switch VLAN?
+port() {  # port <vùng|trunk-<firewall>>: tham số --network của virt-install (cổng access/trunk trên switch, hoặc mạng riêng)
+  case "$1" in trunk-*) echo "network=$SW,portgroup=$1" ;; *) on_sw "$1" && echo "network=$SW,portgroup=$1" || echo "network=$(net "$1")" ;; esac; }
 mac() { local IFS=.; set -- $1; printf '52:54:%02x:%02x:%02x:%02x' "$1" "$2" "$3" "$4"; }   # MAC theo IP: dựng lại không đổi
 stash() { find "$1" -mindepth 1 -maxdepth 1 -exec mv -t "$2" {} +; }   # stash <từ> <tới>: chuyển nội dung thư mục
 is_home() { grep -qsE '^ *lab_provisioner: *libvirt( |$)' "$INVDIR/provisioned.yml"; }   # ansible/ đang dùng máy nhà?
@@ -65,8 +71,9 @@ load_config() {  # load_config <firewall>: console → đăng nhập mặc đị
     case "$tail" in
       root@*'#' | root@*'%' | '#') a=CMD ;;
       *'LAGGs now? [y/N]' | *'VLANs now? [y/N]') a=n ;;
-      *'Enter the WAN interface name'*) a=vtnet1 ;;
-      *'Enter the LAN interface name'*) a=vtnet0 ;;
+      # gán tạm (config.xml chép sau sẽ thay): card đầu là WAN, không LAN — core VLAN chỉ có 1 card trunk
+      *'Enter the WAN interface name'*) a=vtnet0 ;;
+      *'Enter the LAN interface name'*) a="" ;;
       *'Enter the Optional interface 1 name'*) a="" ;;
       *'Do you want to proceed? [y/N]') a=y ;;
       *login:) a=root ;;
@@ -176,9 +183,29 @@ case "${1:-}" in
         done | sort -u)
     [ -z "$C" ] || { echo "!! route của máy này trùng dải lab (xoá mạng libvirt cũ: virsh net-destroy/net-undefine):"; echo "$C"; exit 1; }
     [ -s "$OPN_IMG" ] && [ -s "$UBU_IMG" ] || "$0" image
-    # (1) mạng: mỗi vùng 1 mạng libvirt. wan = NAT ra Internet (máy này là gateway); vùng khác = switch, máy này không có IP
+    # (1) mạng: wan = NAT ra Internet (máy này là gateway, như đường lên nhà mạng). Vùng trong: lab_vlan_trunk → 1 switch
+    #     Open vSwitch, mỗi vùng 1 VLAN (portgroup = cổng access; trunk-<firewall> = cổng trunk các VLAN firewall đó giữ);
+    #     không trunk → mỗi vùng 1 bridge riêng. Máy này không có IP trong các vùng trong
     ZONE=""; systemctl is-active -q firewalld && ZONE=" zone='trusted'"   # firewalld: không lọc gói giữa các VM trên bridge
-    while read -r Z CIDR GW; do
+    if [ "$TRUNK" = yes ] && ! V net-info "$SW" >/dev/null 2>&1; then
+      command -v ovs-vsctl >/dev/null || { echo "!! cần Open vSwitch: sudo pacman -S openvswitch && sudo systemctl enable --now ovs-vswitchd"; exit 1; }
+      sudo ovs-vsctl --may-exist add-br "$SW"
+      X="<network><name>$SW</name><forward mode='bridge'/><bridge name='$SW'/><virtualport type='openvswitch'/>"   # MTU: VM/OPNsense tự đặt lab_mtu (libvirt không nhận <mtu> cho bridge)
+      for Z in "${!VLAN[@]}"; do on_sw "$Z" && X+="<portgroup name='$Z'><vlan><tag id='${VLAN[$Z]}'/></vlan></portgroup>"; done
+      for fw in $($INV fw_names); do
+        read -r _ _ ZS _ < <($INV fw_ports "$fw" | grep ' trunk ') || continue
+        X+="<portgroup name='trunk-$fw'><vlan trunk='yes'>"
+        for Z in ${ZS//,/ }; do X+="<tag id='${VLAN[$Z]}'/>"; done
+        X+="</vlan></portgroup>"
+      done
+      V net-define <(echo "$X</network>") >/dev/null && echo "== switch $SW (Open vSwitch): $(for Z in "${!VLAN[@]}"; do on_sw "$Z" && printf '%s=VLAN %s ' "$Z" "${VLAN[$Z]}"; done)"
+    fi
+    if [ "$TRUNK" = yes ]; then
+      V net-info "$SW" | grep '^Active: *yes' >/dev/null || V net-start "$SW" >/dev/null
+      V net-autostart "$SW" >/dev/null
+    fi
+    while read -r Z CIDR GW _; do
+      on_sw "$Z" && continue
       N=$(net "$Z")
       if ! V net-info "$N" >/dev/null 2>&1; then
         X="<network><name>$N</name><bridge name='$N' stp='off'$ZONE/><mtu size='$($INV mtu)'/>"
@@ -189,14 +216,19 @@ case "${1:-}" in
       V net-autostart "$N" >/dev/null
     done < <($INV zone_list)
     # (2) VM còn thiếu: đĩa = lớp qcow2 trên image gốc. libvirt xếp card vào khe PCI trước đĩa, đúng thứ tự khai báo:
-    #     firewall (i440fx) slot 2,3,4 = vtnet0..n theo nics · VM Linux: i440fx, card ở slot 4 = ens4 (giống hệt GCP)
+    #     firewall (i440fx) slot 2,3,4 = vtnet0..n theo card vật lý (inventory.py fw_ports: trunk + card riêng)
+    #     VM Linux: i440fx, card ở slot 4 = ens4 (giống hệt GCP). MAC theo IP đầu tiên trên card
     while read -r N KIND CPU MEM DISK ZS IPS; do
       exists "$N" && continue
-      IFS=, read -ra ZA <<< "$ZS"; IFS=, read -ra IA <<< "$IPS"
-      SLOT=""; [ "$KIND" = linux ] && SLOT=",address.type=pci,address.domain=0,address.bus=0,address.slot=4"
-      NETS=(); for i in "${!ZA[@]}"; do
-        NETS+=(--network "network=$(net "${ZA[i]}"),model=virtio,mac=$(mac "${IA[i]}")${SLOT:-}")
-      done
+      NETS=()
+      if [ "$KIND" = fw ]; then
+        while read -r _ PK PZ PI; do
+          [ "$PK" = trunk ] && P="trunk-$N" || P=$PZ
+          NETS+=(--network "$(port "$P"),model=virtio,mac=$(mac "${PI%%,*}")")
+        done < <($INV fw_ports "$N")
+      else
+        NETS+=(--network "$(port "$ZS"),model=virtio,mac=$(mac "$IPS"),address.type=pci,address.domain=0,address.bus=0,address.slot=4")
+      fi
       if [ "$KIND" = fw ]; then
         qemu-img create -q -f qcow2 -F qcow2 -b "$OPN_IMG" "$POOL/$N.qcow2" "${DISK}G"
         # đĩa FAT nhãn LABCFG chứa config.xml — như cắm USB; load_config chép vào /conf rồi gỡ ra
@@ -266,7 +298,11 @@ case "${1:-}" in
     echo "Đã bật cả lab. Tunnel: ./lab.sh tunnel up · kiểm tra: make test" ;;
   status)
     V list --all | grep -E "Name|---|$($INV vm_list | cut -d' ' -f1 | paste -sd'|')" || true
-    echo; V net-list --all | grep -E 'Name|---|lab-' || true ;;
+    echo; V net-list --all | grep -E 'Name|---|lab-' || true
+    if [ "$TRUNK" = yes ] && V net-info "$SW" >/dev/null 2>&1; then
+      echo; echo "Cổng trên switch $SW (VLAN: tag = access, trunks = trunk):"
+      sudo ovs-vsctl --columns=name,tag,trunks list port 2>/dev/null | paste - - - - | awk '{print "  "$3, $6, $9}' | grep -v "^  \"$SW\"" || true
+    fi ;;
   purge)
     # Gỡ SẠCH dấu vết lab trên máy này: down + kết nối VPN + trạng thái máy nhà (out/ hoặc out-libvirt/). Giữ image OS gốc
     read -rp "GỠ SẠCH lab máy nhà (VM, đĩa, mạng, VPN, bí mật trong out/)? Gõ purge: " a; [ "$a" = purge ] || exit 1
@@ -290,10 +326,13 @@ case "${1:-}" in
       rm -f "$POOL/$N.qcow2" "$POOL/$N-seed.iso" "$POOL/$N-config.img"
       echo "== đã xoá $N"
     done < <($INV vm_list)
-    while read -r Z _; do
-      N=$(net "$Z"); V net-info "$N" >/dev/null 2>&1 || continue
+    for N in $($INV zone_list | while read -r Z _; do net "$Z"; done) "$SW"; do
+      V net-info "$N" >/dev/null 2>&1 || continue
       V net-destroy "$N" >/dev/null 2>&1 || true; V net-undefine "$N" >/dev/null; echo "== đã xoá mạng $N"
-    done < <($INV zone_list)
+    done
+    if command -v ovs-vsctl >/dev/null && sudo ovs-vsctl br-exists "$SW" 2>/dev/null; then
+      sudo ovs-vsctl del-br "$SW" && echo "== đã xoá switch Open vSwitch $SW"
+    fi
     V pool-refresh default >/dev/null 2>&1 || true
     nmcli connection down lab >/dev/null 2>&1 || true
     rm -f "$OUT"/.config-loaded-*

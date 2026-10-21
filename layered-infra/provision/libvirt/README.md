@@ -33,7 +33,7 @@ Cùng dải IP nên **không bật VPN tới cả hai cùng lúc**: tắt lab m�
 
 | Lệnh | Xoá | Giữ |
 |---|---|---|
-| `make libvirt-down` | 8 VM + đĩa của chúng, 4 mạng `lab-*` | image OS gốc (`/data/lab-images/`), `out/` |
+| `make libvirt-down` | 8 VM + đĩa của chúng, mạng `lab-wan` + switch `lab-sw` (Open vSwitch) | image OS gốc (`/data/lab-images/`), `out/` |
 | `make libvirt-purge` | như `down` + kết nối VPN `lab` + trạng thái máy nhà (`out/` hoặc `out-libvirt/`) | đang ở máy nhà thì chạy thêm `make libvirt-restore` |
 
 Cả hai đọc `hosts.yml` + `provisioned.yml` cạnh đây, nên chạy được cả sau khi đã `restore` về GCP. Chỉ xoá đúng tên trong
@@ -42,21 +42,38 @@ Cả hai đọc `hosts.yml` + `provisioned.yml` cạnh đây, nên chạy đư�
 Image OS gốc (OPNsense nano ~2GB, Ubuntu cloud image ~600MB) nằm ở `lab_image_dir` (`/data/lab-images/`): tải 1 lần, mọi
 đĩa VM là lớp qcow2 mỏng trên đó. Không lệnh nào xoá thư mục này; muốn xoá hẳn: `rm -r /data/lab-images` (khi không còn VM).
 
-Cần: `libvirt` (qemu:///system, user trong nhóm `libvirt`), `virt-install`, `xorriso`, `mtools`, `dosfstools`, `tmux`,
+Cần: `libvirt` (qemu:///system, user trong nhóm `libvirt`), `openvswitch` (`ovs-vswitchd` chạy, `sudo` để tạo switch), `virt-install`, `xorriso`, `mtools`, `dosfstools`, `tmux`,
 `wireguard-tools`, khoá `~/.ssh/id_ed25519`.
 
-## Mạng
+## Mạng — như on-prem thật: 1 switch, mỗi vùng 1 VLAN
 
-| Mạng libvirt | Dải | Máy này | Ghi chú |
-|---|---|---|---|
-| `lab-wan` | 10.99.0.0/24 | 10.99.0.1 (NAT ra Internet) | "Internet" của lab: biên 10.99.0.2 = IP web, 10.99.0.3 = IP VPN (Virtual IP) |
-| `lab-dmz` · `lab-lan` · `lab-mgmt` | 10.10.10/24 · 10.20.0/24 · 10.40.0/24 | — | máy này không có IP → chỉ vào được qua VPN, như on-prem thật |
+```
+ Internet ── NAT libvirt (lab-wan 10.99.0.0/24, máy này .1) ── WAN  firewall-edge-01
+                                                                     │ trunk: VLAN 10
+ ┌──────────────────── Open vSwitch lab-sw ─────────────────────────┴─────────────┐
+ │ VLAN 10 dmz  10.10.10.0/24   access: edge-01                                     │
+ │ VLAN 20 lan  10.20.0.0/24    access: k8s-master-01, k8s-worker-01, infra-01      │
+ │ VLAN 40 mgmt 10.40.0.0/24    access: jump-01, siem-01                            │
+ └──────────────────────────────────────┬──────────────────────────────────────────┘
+                                         │ trunk: VLAN 10, 20, 40
+                                  firewall-core-01 (1 card: vtnet0_vlan10 / _vlan20 / _vlan40)
+```
 
-- GCP có router `.1` của VPC; máy nhà không có → `lab_hosting: onprem`: máy trỏ thẳng gateway vào firewall `.253` của vùng,
-  `extra_routes` (DMZ → LAN/MGMT qua core `.252`) thành route tĩnh trên máy trong DMZ và trên firewall biên. Địa chỉ `.1`
-  bỏ trống.
-- VM Linux: máy i440fx, card ở khe PCI 4 → tên `ens4` như GCP. Firewall: card theo thứ tự khai báo = `vtnet0..n`.
-- MAC lấy theo IP (`52:54:0a:14:00:0b` = 10.20.0.11): dựng lại VM không đổi MAC.
+| Thành phần | Cấu hình |
+|---|---|
+| `lab-wan` | mạng NAT libvirt, tách khỏi switch (như đường lên nhà mạng): biên 10.99.0.2 = IP web, 10.99.0.3 = IP VPN (Virtual IP) |
+| `lab-sw` | 1 bridge Open vSwitch + mạng libvirt cùng tên; portgroup `dmz`/`lan`/`mgmt` = cổng access, `trunk-<firewall>` = cổng trunk |
+| VLAN ID | `vlan` của từng vùng trong `hosts.yml` (GCP bỏ qua); bật bằng `lab_vlan_trunk: true` trong `provisioned.yml` |
+| Firewall | card trunk → OPNsense tạo interface VLAN `vtnet<i>_vlan<tag>`; biên: trunk (vtnet0) + WAN (vtnet1); core: chỉ vtnet0 |
+| VM | cổng access, không biết VLAN: card `ens4` (máy i440fx, khe PCI 4 như GCP) |
+
+Xem switch: `make libvirt-status` (cổng + tag/trunks) · `sudo ovs-vsctl show` · `virsh net-dumpxml lab-sw`.
+Tắt `lab_vlan_trunk` thì mỗi vùng 1 bridge riêng (`lab-dmz`, `lab-lan`, `lab-mgmt`), firewall mỗi vùng 1 card.
+
+- GCP có router `.1` của VPC; máy nhà không có → `lab_hosting: onprem`: máy trỏ gateway thẳng vào firewall `.253` của vùng,
+  `extra_routes` (DMZ → LAN/MGMT qua core `.252`) thành route tĩnh trên máy trong DMZ và trên firewall biên. Core tắt
+  reply-to (trả lời máy DMZ đi thẳng, không vòng qua biên). Địa chỉ `.1` bỏ trống.
+- MAC lấy theo IP (`52:54:0a:14:00:0b` = 10.20.0.11; card trunk theo IP đầu tiên): dựng lại VM không đổi MAC.
 - VM Linux: lớp qcow2 trên Ubuntu 24.04 cloud image + cloud-init (user `ubuntu`, khoá SSH, IP tĩnh + route giống role
   `node_network`).
 - Firewall: lớp qcow2 trên bản nano gốc + đĩa FAT `LABCFG` chứa `config.xml` (như cắm USB); `up` đăng nhập qua console nối

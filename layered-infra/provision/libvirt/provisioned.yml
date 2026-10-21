@@ -7,6 +7,9 @@ all:
     lab_hosting: onprem               # không có router .1 của VPC: máy trỏ thẳng vào firewall (fw) của vùng, ARP thật
     node_network_mode: static         # không có DHCP: cloud-init đặt IP tĩnh lần boot đầu, Ansible (node_network) ghi lại y hệt
     ntp_client: systemd-timesyncd     # Ubuntu cloud image (bản generic) dùng timesyncd
+    # Như on-prem thật: 1 switch (Open vSwitch lab-sw), mỗi vùng 1 VLAN (vlan trong hosts.yml). VM cắm cổng access,
+    # firewall cắm cổng trunk → OPNsense dùng interface VLAN (vtnet0_vlan20…) thay vì mỗi vùng 1 card
+    lab_vlan_trunk: true
 
     # IP "public" của biên trên lab-wan (máy này tới thẳng). VPN có IP riêng như GCP: Virtual IP trên WAN của biên
     fw_public_ip: 10.99.0.2

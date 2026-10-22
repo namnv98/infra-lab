@@ -27,7 +27,7 @@ P = invlib.load()
 fw_name, FW = next((k, f) for k, f in P["firewalls"].items() if f["role"] == role)
 GCP = P.get("platform", "gcp") == "gcp"
 # dev: tên card trong FreeBSD — mặc định vtnet<i> (virtio: KVM/Proxmox/GCP); VMware: vmx<i>, máy thật: igb<i>/em<i>/ix<i> → ghi dev trong nics (hosts.yml)
-# lab_vlan_trunk: vùng có vlan đi chung 1 card trunk → interface VLAN vtnet<i>_vlan<tag> (inventory.fw_ports)
+# lab_switches: các vùng cắm cùng 1 switch đi chung 1 card trunk → interface VLAN vtnet<i>_vlan<tag> (inventory.fw_ports)
 zones_t = [(n["if"], invlib.nic_dev(P, fw_name, n), n["ip"], n.get("descr"), P["zones"][n["zone"]]["cidr"].split("/")[1])
            for n in FW["nics"]]
 my_nic = {n["zone"]: n for n in FW["nics"]}
@@ -149,7 +149,7 @@ for name, nic, ip, descr, prefix in ZONES:
                     e.remove(c)
 
 # --- VLAN (on-prem có switch): thiết bị VLAN trên card trunk, interface ở trên dùng tên thiết bị này ---
-if P["vlan_trunk"]:
+if any(x["trunk"] for x in invlib.fw_ports(P, fw_name)):
     vl = sub(r, "vlans")
     vl.set("version", "1.0.0")
     for x in invlib.fw_ports(P, fw_name):

@@ -7,9 +7,25 @@ all:
     lab_hosting: onprem               # không có router .1 của VPC: máy trỏ thẳng vào firewall (fw) của vùng, ARP thật
     node_network_mode: static         # không có DHCP: cloud-init đặt IP tĩnh lần boot đầu, Ansible (node_network) ghi lại y hệt
     ntp_client: systemd-timesyncd     # Ubuntu cloud image (bản generic) dùng timesyncd
-    # Như on-prem thật: 1 switch (Open vSwitch lab-sw), mỗi vùng 1 VLAN (vlan trong hosts.yml). VM cắm cổng access,
-    # firewall cắm cổng trunk → OPNsense dùng interface VLAN (vtnet0_vlan20…) thay vì mỗi vùng 1 card
-    lab_vlan_trunk: true
+    # Như on-prem thật: switch Open vSwitch, mỗi vùng 1 VLAN (vlan trong hosts.yml). Mỗi switch khai:
+    #   fw     = vùng mà card firewall cắm vào switch này (≥ 2 vùng của 1 firewall → 1 card trunk, interface vtnet0_vlan20…;
+    #            1 vùng → card thường, cổng access)
+    #   hosts  = vùng mà VM cắm vào switch này (cổng access, VM không biết VLAN)
+    #   uplink = dây trunk tới switch khác: chỉ những VLAN khai ở đây đi qua (cắt VLAN thừa như mạng thật).
+    #            { vlans: [..], links: 2 } = 2 dây gộp LACP (rút 1 dây vẫn chạy); thêm lacp: false = 2 dây riêng, RSTP chặn 1
+    #   stp_priority = ưu tiên RSTP (bội 4096, nhỏ = gốc; mặc định 32768). Mọi switch đều bật RSTP
+    #   mgmt   = IP quản trị của switch (trong 1 vùng có trên switch): mạng quản trị tách riêng (network namespace), gửi
+    #            sFlow (mẫu 1/128 gói) về siem-01. OVS không chạy RSTP trên cổng LACP: cổng gộp đứng ngoài RSTP
+    # Bỏ hẳn khoá này thì mỗi vùng 1 bridge riêng (lab-dmz, lab-lan…), firewall mỗi vùng 1 card
+    lab_switches:
+      sw-dmz:    { fw: [dmz], hosts: [dmz] }                                     # DMZ tách vật lý, không nối switch nào
+      sw-core:                                                                   # phân phối: trunk firewall core + uplink
+        fw: [lan, mgmt]
+        hosts: [mgmt]
+        uplink: { sw-access: { vlans: [lan], links: 2 } }
+        stp_priority: 4096
+        mgmt: 10.40.0.250
+      sw-access: { hosts: [lan] }                                                 # switch tủ K8s
 
     # IP "public" của biên trên lab-wan (máy này tới thẳng). VPN có IP riêng như GCP: Virtual IP trên WAN của biên
     fw_public_ip: 10.99.0.2

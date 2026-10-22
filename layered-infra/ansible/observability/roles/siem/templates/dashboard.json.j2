@@ -29,6 +29,15 @@
     { "id": 6, "type": "logs", "title": "K8s audit: exec, tạo, sửa, xoá",
       "gridPos": { "x": 0, "y": 24, "w": 24, "h": 10 },
       "datasource": { "type": "loki", "uid": "loki" },
-      "targets": [ { "refId": "A", "expr": "{app=\"k8s-audit\"} |~ \"\\\"verb\\\":\\\"(create|update|patch|delete)\\\"|subresource\\\":\\\"exec\" != \"system:serviceaccount\"" } ] }
+      "targets": [ { "refId": "A", "expr": "{app=\"k8s-audit\"} |~ \"\\\"verb\\\":\\\"(create|update|patch|delete)\\\"|subresource\\\":\\\"exec\" != \"system:serviceaccount\"" } ] }{% if sflow_enabled | bool %},
+    { "id": 7, "type": "timeseries", "title": "Lưu lượng qua switch theo VLAN (sFlow, ước lượng = byte mẫu × tỉ lệ lấy mẫu)",
+      "gridPos": { "x": 0, "y": 34, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "targets": [ { "refId": "A", "expr": "sum by (vlan) (sum_over_time({app=\"sflow\"} | json | type=\"SFLOW_5\" | unwrap bytes [1m])) * on (vlan) group_left avg by (vlan) (avg_over_time({app=\"sflow\"} | json | type=\"SFLOW_5\" | unwrap sampling_rate [1m])) / 60", "legendFormat": "VLAN {{ '{{' }}vlan{{ '}}' }}" } ] },
+    { "id": 8, "type": "table", "title": "Cặp máy nói chuyện nhiều nhất qua switch (sFlow, 15 phút)",
+      "gridPos": { "x": 12, "y": 34, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [ { "refId": "A", "instant": true, "expr": "topk(10, sum by (src, dst, vlan) (sum_over_time({app=\"sflow\"} | json | unwrap bytes [15m])))" } ] }{% endif %}
   ]
 }

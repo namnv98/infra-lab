@@ -17,8 +17,14 @@ Dùng như thư viện (opnsense-bootstrap.py, gcp.sh) hoặc lệnh cho shell (
   inventory.py get public_web|public_vpn  IP public của firewall biên: web (80/443) · VPN (Endpoint WireGuard)
   inventory.py get admin_ip          IP máy admin như firewall biên thấy (admin_public_ip; trống = tự dò IP public)
   inventory.py get zone_list         "vùng dải gateway vlan" từng vùng (vlan "-" nếu không có; bộ tạo máy dựng mạng)
-  inventory.py get vlan_trunk        yes | no — firewall nhận các vùng có vlan qua 1 card trunk (lab_vlan_trunk)
-  inventory.py get fw_ports <tên>    "card trunk|access vùng,… IP,…" từng card vật lý của firewall (thứ tự = vtnet0..n)
+  inventory.py get sw_list           tên các switch Open vSwitch (lab_switches; trống = mỗi vùng 1 bridge riêng)
+  inventory.py get sw_ports <switch> "access <vùng> <vlan>" · "trunk trunk-<firewall> <vlan,…>"
+                                     · "uplink <switch kia> <vlan,…> lacp|rstp <veth này:veth kia:số cổng,…>"
+  inventory.py get sw_stp <switch>   ưu tiên RSTP (stp_priority, mặc định 32768)
+  inventory.py get sw_mgmt           "switch card IP/prefix gateway vlan số-thứ-tự IP-siem" từng switch có IP quản trị
+  inventory.py get host_sw <vùng>    switch mà VM của vùng cắm vào ("-" nếu không có: mạng riêng lab-<vùng>)
+  inventory.py get zone_sw <vùng>    switch đầu tiên có vùng này (VM hoặc firewall); "-" = mạng riêng lab-<vùng>
+  inventory.py get fw_ports <tên>    "card trunk|access vùng,… IP,… switch|-" từng card vật lý của firewall (thứ tự = vtnet0..n)
   inventory.py get vm_list           "tên fw|linux vCPU RAM(MiB) đĩa(GB) vùng,… IP,…" từng máy (vcpus/ram_mb/disk_gb)
   inventory.py get host_net <tên>    "IP/prefix gateway DNS" của 1 VM Linux (cloud-init lần boot đầu)
   inventory.py get zone_fw <vùng>    card firewall của vùng (gateway của máy on-prem, DNS/NTP của máy trong vùng)
@@ -57,7 +63,7 @@ def load():
          "k8s": {"api_vip": v["api_vip"], "gateways": v["gateways"], "metallb_pools": v.get("metallb_pools", {})},
          "public": {k: v[f] for k, f in (("web", "fw_public_ip"), ("vpn", "vpn_public_ip")) if v.get(f)},
          "admin_ip": v.get("admin_public_ip"), "image_dir": v.get("lab_image_dir", ""),
-         "vlan_trunk": bool(v.get("lab_vlan_trunk", False)),
+         "switches": v.get("lab_switches") or {},
          "firewalls": {}, "hosts": {}}
     for name, h, groups in _hosts(inv):
         if "firewalls" in groups:
@@ -79,20 +85,59 @@ def nic(p, fw, zone):
     return next(n["ip"] for n in p["firewalls"][fw]["nics"] if n["zone"] == zone)
 
 
+def sw_of(p, zone, kind):
+    """Switch (lab_switches) mà card firewall (kind=fw) hoặc VM (kind=hosts) của vùng cắm vào; None = mạng riêng của vùng."""
+    return next((s for s, v in p["switches"].items() if zone in (v.get(kind) or [])), None)
+
+
+def uplinks(p, sw):
+    """Uplink của 1 switch, khai ở đầu nào cũng được: {switch kia: {vlans: [vùng cho qua], links: số dây, lacp: gộp dây?}}.
+    Khai gọn [vùng,…] = 1 dây. Nhiều dây: lacp (mặc định) = gộp thành 1 cổng logic; lacp: false = dây riêng, RSTP chặn dây thừa."""
+    def norm(u):
+        u = {"vlans": u} if isinstance(u, list) else dict(u)
+        u.setdefault("links", 1)
+        u["lacp"] = u.get("lacp", True) and u["links"] > 1
+        return u
+    out = {peer: norm(u) for peer, u in (p["switches"][sw].get("uplink") or {}).items()}
+    out.update({s: norm(v["uplink"][sw]) for s, v in p["switches"].items() if sw in (v.get("uplink") or {})})
+    return out
+
+
+def short(sw):
+    """Tên ngắn của switch cho tên card Linux (≤ 15 ký tự): sw-core → core."""
+    return sw.removeprefix("sw-")
+
+
+def uplink_ifs(sw, peer, links):
+    """Dây uplink = cặp veth: [(đầu ở sw, đầu ở peer)], vd. core-access1 ↔ access-core1."""
+    return [(f"{short(sw)}-{short(peer)}{i}", f"{short(peer)}-{short(sw)}{i}") for i in range(1, links + 1)]
+
+
+def mgmt_zone(p, ip):
+    """Vùng chứa IP quản trị của switch."""
+    a = ipaddress.ip_address(ip)
+    return next((z for z, v in p["zones"].items() if a in ipaddress.ip_network(v["cidr"])), None)
+
+
+def sw_vlans(p, sw):
+    """Vùng có mặt trên switch: card firewall, VM, hoặc đi qua uplink."""
+    v = p["switches"][sw]
+    return set((v.get("fw") or []) + (v.get("hosts") or []) + [z for u in uplinks(p, sw).values() for z in u["vlans"]])
+
+
 def fw_ports(p, fw):
-    """Card vật lý của firewall theo thứ tự (= vtnet0..n): [{dev, trunk, nics}]. Không trunk: mỗi nic 1 card.
-    lab_vlan_trunk: mọi nic ở vùng có vlan gom vào 1 card trunk (đặt ở vị trí nic VLAN đầu tiên), nic khác giữ card riêng."""
+    """Card vật lý của firewall theo thứ tự (= vtnet0..n): [{dev, trunk, nics, sw}]. Các nic cắm cùng 1 switch gom vào 1 card
+    (đặt ở vị trí nic đầu tiên): từ 2 vùng trở lên là card trunk (interface VLAN), 1 vùng là card thường cắm cổng access."""
     ports = []
     for n in p["firewalls"][fw]["nics"]:
-        if p["vlan_trunk"] and p["zones"][n["zone"]].get("vlan"):
-            t = next((x for x in ports if x["trunk"]), None)
-            if t is None:
-                t = {"trunk": True, "nics": []}
-                ports.append(t)
-            t["nics"].append(n)
+        sw = sw_of(p, n["zone"], "fw")
+        x = next((x for x in ports if sw and x["sw"] == sw), None)
+        if x is None:
+            ports.append({"sw": sw, "nics": [n]})
         else:
-            ports.append({"trunk": False, "nics": [n]})
+            x["nics"].append(n)
     for i, x in enumerate(ports):
+        x["trunk"] = len(x["nics"]) > 1
         x["dev"] = x["nics"][0].get("dev", f"vtnet{i}") if not x["trunk"] else f"vtnet{i}"
     return ports
 
@@ -149,8 +194,6 @@ def check(p):
         if gcp and ipaddress.ip_address(v["gateway"]) != zones[z].network_address + 1:
             errs.append(f"vùng {z}: gateway {v['gateway']} phải là .1 (GCP)")
     for fw, f in p["firewalls"].items():
-        if p["vlan_trunk"] and gcp:
-            errs.append("lab_vlan_trunk: GCP không có VLAN (mỗi vùng 1 VPC)")
         if gcp and len(f["nics"]) > VCPU.get(f["type"], 0):
             errs.append(f"{fw}: {len(f['nics'])} card > {VCPU.get(f['type'])} vCPU của {f['type']}")
         for n in f["nics"]:
@@ -163,6 +206,10 @@ def check(p):
     vlans = [v["vlan"] for v in p["zones"].values() if "vlan" in v]
     if len(vlans) != len(set(vlans)) or not all(isinstance(t, int) and 1 <= t <= 4094 for t in vlans):
         errs.append(f"vlan của các vùng phải là số 1–4094, không trùng: {vlans}")
+    errs += check_switches(p, gcp)
+    for s, v in p["switches"].items():
+        if v.get("mgmt") and mgmt_zone(p, v["mgmt"]):
+            use(v["mgmt"], mgmt_zone(p, v["mgmt"]), f"lab_switches.{s}/mgmt")
     for n, h in p["hosts"].items():
         use(h["ip"], h["zone"], n)
         for a in h.get("alias", []):
@@ -176,6 +223,49 @@ def check(p):
             nic(p, r["via"], r["in"])
         except StopIteration:
             errs.append(f"route {r['name']}: {r['via']} không có card trong vùng {r['in']}")
+    return errs
+
+
+def check_switches(p, gcp):
+    """lab_switches: vùng có vlan, mỗi vùng cắm ở tối đa 1 switch cho firewall và 1 switch cho VM; switch của VM phải là
+    switch của firewall hoặc nối thẳng tới nó bằng uplink cho vùng đó đi qua (không thì VM không tới được gateway)."""
+    errs, sws = [], p["switches"]
+    if sws and gcp:
+        return ["lab_switches: GCP không có switch/VLAN (mỗi vùng 1 VPC)"]
+    for kind in ("fw", "hosts"):
+        for z in p["zones"]:
+            on = [s for s, v in sws.items() if z in (v.get(kind) or [])]
+            if len(on) > 1:
+                errs.append(f"lab_switches: vùng {z} có {kind} ở nhiều switch {on}")
+    for s, v in sws.items():
+        for peer, u in (v.get("uplink") or {}).items():
+            if peer not in sws:
+                errs.append(f"lab_switches.{s}: uplink tới switch lạ {peer}")
+            elif not isinstance(u, list) and not (isinstance(u.get("links", 1), int) and 1 <= u.get("links", 1) <= 4):
+                errs.append(f"lab_switches.{s}.uplink.{peer}: links phải là số 1–4")
+        if errs:
+            return errs
+        for z in sw_vlans(p, s):
+            if z not in p["zones"] or not p["zones"][z].get("vlan"):
+                errs.append(f"lab_switches.{s}: vùng {z} không có hoặc thiếu vlan")
+        for peer, u in uplinks(p, s).items():
+            if any(len(n) > 15 for pair in uplink_ifs(s, peer, u["links"]) for n in pair):
+                errs.append(f"lab_switches: tên {s}/{peer} dài quá (tên card veth ≤ 15 ký tự)")
+        if v.get("mgmt"):
+            z = mgmt_zone(p, v["mgmt"])
+            if z is None or z not in sw_vlans(p, s):
+                errs.append(f"lab_switches.{s}: mgmt {v['mgmt']} phải thuộc 1 vùng có trên switch này")
+            if len(f"{short(s)}-mgmt") > 15:
+                errs.append(f"lab_switches: tên {s} dài quá (tên card {short(s)}-mgmt ≤ 15 ký tự)")
+        prio = v.get("stp_priority", 32768)
+        if not (isinstance(prio, int) and 0 <= prio <= 61440 and prio % 4096 == 0):
+            errs.append(f"lab_switches.{s}: stp_priority phải là bội của 4096, 0–61440")
+    if errs:
+        return errs
+    for z in p["zones"]:
+        hs, fs = sw_of(p, z, "hosts"), sw_of(p, z, "fw")
+        if hs and hs != fs and z not in uplinks(p, hs).get(fs, {}).get("vlans", []):
+            errs.append(f"lab_switches: VM vùng {z} ở {hs}, firewall ở {fs or '(không switch)'} — cần uplink {hs} ↔ {fs} cho {z} đi qua")
     return errs
 
 
@@ -231,11 +321,38 @@ def get(p, key, *args):
         return p.get("admin_ip") or ""
     if key == "zone_list":
         return "\n".join(f"{z} {v['cidr']} {v['gateway']} {v.get('vlan', '-')}" for z, v in p["zones"].items())
-    if key == "vlan_trunk":
-        return "yes" if p["vlan_trunk"] else "no"
+    if key == "sw_list":
+        return " ".join(p["switches"])
+    if key == "sw_ports":   # portgroup (cổng access của từng vùng, trunk của từng firewall) + uplink của 1 switch
+        sw, vl = args[0], lambda zs: ",".join(str(p["zones"][z]["vlan"]) for z in zs)
+        v = p["switches"][sw]
+        rows = [f"access {z} {p['zones'][z]['vlan']}" for z in dict.fromkeys((v.get("fw") or []) + (v.get("hosts") or []))]
+        rows += [f"trunk trunk-{f} {vl([n['zone'] for n in x['nics']])}"
+                 for f in p["firewalls"] for x in fw_ports(p, f) if x["sw"] == sw and x["trunk"]]
+        # dây uplink cắm các cổng cuối, cố định (như uplink 47–48 của switch 48 cổng); cổng VM do OVS cấp từ 1 theo thứ tự cắm
+        ups = [(peer, u, a, b) for peer, u in uplinks(p, sw).items() for a, b in uplink_ifs(sw, peer, u["links"])]
+        port = {a: 49 - len(ups) + i for i, (_, _, a, _) in enumerate(ups)}
+        rows += [f"uplink {peer} {vl(u['vlans'])} {'lacp' if u['lacp'] else 'rstp'} "
+                 f"{','.join(f'{a}:{b}:{port[a]}' for a, b in uplink_ifs(sw, peer, u['links']))}" for peer, u in uplinks(p, sw).items()]
+        return "\n".join(rows)
+    if key == "sw_stp":     # ưu tiên RSTP của switch (nhỏ = được bầu làm gốc)
+        return p["switches"][args[0]].get("stp_priority", 32768)
+    if key == "sw_mgmt":    # IP quản trị của switch (namespace riêng, như mạng quản trị tách của switch thật) + nơi nhận sFlow
+        siem = host_in_group(p, "siem")
+        rows = []
+        for i, (s, v) in enumerate(p["switches"].items()):
+            if v.get("mgmt"):
+                z = p["zones"][mgmt_zone(p, v["mgmt"])]
+                rows.append(f"{s} {short(s)}-mgmt {v['mgmt']}/{z['cidr'].split('/')[1]} {z.get('fw', z['gateway'])} {z['vlan']} "
+                            f"{i} {p['hosts'][siem[0]]['ip'] if siem else '-'}")
+        return "\n".join(rows)
+    if key == "host_sw":
+        return sw_of(p, args[0], "hosts") or "-"
+    if key == "zone_sw":    # vùng có trên switch nào không (VM hoặc card firewall); "-" = cần bridge riêng lab-<vùng>
+        return sw_of(p, args[0], "hosts") or sw_of(p, args[0], "fw") or "-"
     if key == "fw_ports":
         return "\n".join(f"{x['dev']} {'trunk' if x['trunk'] else 'access'} {','.join(n['zone'] for n in x['nics'])} "
-                         f"{','.join(n['ip'] for n in x['nics'])}" for x in fw_ports(p, args[0]))
+                         f"{','.join(n['ip'] for n in x['nics'])} {x['sw'] or '-'}" for x in fw_ports(p, args[0]))
     if key == "vm_list":   # bộ tạo máy cần vcpus/ram_mb ghi trong hosts.yml (GCP dùng machine_type thay thế)
         rows = [(n, "fw", f, [x["zone"] for x in f["nics"]], [x["ip"] for x in f["nics"]]) for n, f in p["firewalls"].items()]
         rows += [(n, "linux", h, [h["zone"]], [h["ip"]]) for n, h in p["hosts"].items()]

@@ -31,12 +31,9 @@ FILES=(ansible/shared/inventory/provisioned.yml)   # phần riêng của 1 môi 
 V() { LC_ALL=C virsh -c qemu:///system "$@"; }   # LC_ALL=C: grep chữ tiếng Anh (running, shut off)
 exists() { V dominfo "$1" >/dev/null 2>&1; }
 net() { echo "lab-$1"; }                                   # tên mạng libvirt = tên bridge (≤ 15 ký tự)
-SW=lab-sw                                                  # switch Open vSwitch khi lab_vlan_trunk: mỗi vùng 1 VLAN
-TRUNK=$($INV vlan_trunk)
-declare -A VLAN; while read -r Z _ _ T; do VLAN[$Z]=$T; done < <($INV zone_list)
-on_sw() { [ "$TRUNK" = yes ] && [ "${VLAN[$1]}" != - ]; }  # vùng này nằm trên switch VLAN?
-port() {  # port <vùng|trunk-<firewall>>: tham số --network của virt-install (cổng access/trunk trên switch, hoặc mạng riêng)
-  case "$1" in trunk-*) echo "network=$SW,portgroup=$1" ;; *) on_sw "$1" && echo "network=$SW,portgroup=$1" || echo "network=$(net "$1")" ;; esac; }
+read -ra SWS <<< "$($INV sw_list)"                        # switch Open vSwitch (lab_switches); trống = mỗi vùng 1 bridge riêng
+port() {  # port <vùng|trunk-<firewall>> <switch|->: tham số --network của virt-install (cổng access/trunk trên switch, hoặc mạng riêng)
+  if [ "$2" != - ]; then echo "network=$2,portgroup=$1"; else echo "network=$(net "$1")"; fi; }
 mac() { local IFS=.; set -- $1; printf '52:54:%02x:%02x:%02x:%02x' "$1" "$2" "$3" "$4"; }   # MAC theo IP: dựng lại không đổi
 stash() { find "$1" -mindepth 1 -maxdepth 1 -exec mv -t "$2" {} +; }   # stash <từ> <tới>: chuyển nội dung thư mục
 is_home() { grep -qsE '^ *lab_provisioner: *libvirt( |$)' "$INVDIR/provisioned.yml"; }   # ansible/ đang dùng máy nhà?
@@ -71,7 +68,7 @@ load_config() {  # load_config <firewall>: console → đăng nhập mặc đị
     case "$tail" in
       root@*'#' | root@*'%' | '#') a=CMD ;;
       *'LAGGs now? [y/N]' | *'VLANs now? [y/N]') a=n ;;
-      # gán tạm (config.xml chép sau sẽ thay): card đầu là WAN, không LAN — core VLAN chỉ có 1 card trunk
+      # gán tạm (config.xml chép sau sẽ thay): card đầu là WAN, không LAN — config.xml thật gán lại mọi card/VLAN
       *'Enter the WAN interface name'*) a=vtnet0 ;;
       *'Enter the LAN interface name'*) a="" ;;
       *'Enter the Optional interface 1 name'*) a="" ;;
@@ -126,6 +123,102 @@ ethernets:
 EOF
   xorriso -as mkisofs -quiet -volid cidata -joliet -rock -o "$2" "$d"/user-data "$d"/meta-data "$d"/network-config 2>/dev/null
   rm -rf "$d"
+}
+
+SFLOW_PORT=6343   # cổng sFlow chuẩn: siem-01 nghe ở đây (observability, goflow2)
+switches() {  # dựng/cập nhật switch Open vSwitch (lab_switches); chạy lại được — up, start (veth/namespace mất khi máy này khởi động lại)
+  [ ${#SWS[@]} = 0 ] && return
+  command -v ovs-vsctl >/dev/null || { echo "!! cần Open vSwitch: sudo pacman -S openvswitch && sudo systemctl enable --now ovs-vswitchd"; exit 1; }
+  local S X K PG T PEER MODE L P A B OF NS M IP GW VL I SIEM R LL NX
+  local -a IFS_UP OFS
+  # (a) bridge + mạng libvirt: portgroup <vùng> = cổng access, trunk-<firewall> = cổng trunk các VLAN firewall đó giữ
+  for S in "${SWS[@]}"; do
+    sudo ovs-vsctl --may-exist add-br "$S"
+    if ! V net-info "$S" >/dev/null 2>&1; then
+      X="<network><name>$S</name><forward mode='bridge'/><bridge name='$S'/><virtualport type='openvswitch'/>"   # MTU: VM/OPNsense tự đặt lab_mtu (libvirt không nhận <mtu> cho bridge)
+      while read -r K PG T _; do
+        case "$K" in
+          access) X+="<portgroup name='$PG'><vlan><tag id='$T'/></vlan></portgroup>" ;;
+          trunk) X+="<portgroup name='$PG'><vlan trunk='yes'>"; for t in ${T//,/ }; do X+="<tag id='$t'/>"; done; X+="</vlan></portgroup>" ;;
+        esac
+      done < <($INV sw_ports "$S")
+      V net-define <(echo "$X</network>") >/dev/null && echo "== switch $S (Open vSwitch): $($INV sw_ports "$S" | cut -d' ' -f1-3 | paste -sd' ')"
+    fi
+    V net-info "$S" | grep '^Active: *yes' >/dev/null || V net-start "$S" >/dev/null
+    V net-autostart "$S" >/dev/null
+  done
+  # (b) uplink: mỗi dây 1 cặp veth (như 1 sợi cáp), trunk chỉ các VLAN khai. Nhiều dây: lacp = gộp 1 cổng (bond, LACP active,
+  #     OVS không chạy RSTP trên bond); rstp = mỗi dây 1 cổng, RSTP chặn dây thừa. Chạy lại thì cập nhật danh sách VLAN
+  for S in "${SWS[@]}"; do
+    while read -r K PEER T MODE L; do
+      [ "$K" = uplink ] || continue
+      IFS_UP=(); OFS=()
+      for P in ${L//,/ }; do
+        IFS=: read -r A B OF <<< "$P"
+        ip link show "$A" >/dev/null 2>&1 || sudo ip link add "$A" type veth peer name "$B"
+        sudo sysctl -qw "net.ipv6.conf.$A.disable_ipv6=1"   # dây cáp: máy này không gửi gì lên (IPv6 tự cấu hình)
+        sudo ip link set "$A" up; IFS_UP+=("$A"); OFS+=(-- set interface "$A" ofport_request="$OF")   # cổng cố định 47, 48…
+      done
+      if [ "$MODE" = lacp ]; then   # đổi chế độ: gỡ cổng của chế độ kia trước
+        for A in "${IFS_UP[@]}"; do sudo ovs-vsctl --if-exists del-port "$S" "$A"; done
+        sudo ovs-vsctl --may-exist add-bond "$S" "lag-$PEER" "${IFS_UP[@]}" -- set port "lag-$PEER" lacp=active bond_mode=balance-tcp \
+          other_config:lacp-time=fast other_config:rstp-enable=false vlan_mode=trunk trunks="$T" "${OFS[@]}"
+      else
+        sudo ovs-vsctl --if-exists del-port "$S" "lag-$PEER"
+        for A in "${IFS_UP[@]}"; do sudo ovs-vsctl --may-exist add-port "$S" "$A" -- set port "$A" vlan_mode=trunk trunks="$T"; done
+        sudo ovs-vsctl "${OFS[@]:1}"
+      fi
+    done < <($INV sw_ports "$S")
+  done
+  # (c) IP quản trị: card internal của switch (cổng access VLAN quản trị) trong network namespace riêng = mạng quản trị tách
+  #     khỏi máy này (máy này không có IP trong vùng nào, không thành đường vòng qua firewall). sFlow: ovs-vswitchd gửi tới đầu
+  #     veth trong namespace (169.254.x.2); namespace chỉ chuyển UDP sFlow tới siem-01 (NAT nguồn = IP quản trị), chặn mọi thứ khác
+  while read -r S M IP GW VL I SIEM; do
+    NS=$S; NX="sudo ip netns exec $NS"
+    [ -e "/run/netns/$NS" ] || sudo ip netns add "$NS"
+    sudo ovs-vsctl --may-exist add-port "$S" "$M" tag="$VL" -- set interface "$M" type=internal ofport_request=100   # không chiếm cổng VM
+    ip link show "$M" >/dev/null 2>&1 && sudo ip link set "$M" netns "$NS"   # card mới nằm ở máy này → chuyển vào namespace
+    $NX ip link set lo up; $NX ip link set "$M" mtu "$($INV mtu)" up
+    $NX ip addr replace "$IP" dev "$M"; $NX ip route replace default via "$GW"
+    [ "$SIEM" = - ] && continue
+    R="${M%-mgmt}-sfl"; LL="169.254.$((100 + I))"
+    ip link show "$R" >/dev/null 2>&1 || sudo ip link add "$R" type veth peer name sfl0 netns "$NS"
+    sudo ip addr replace "$LL.1/30" dev "$R"; sudo ip link set "$R" up
+    $NX ip addr replace "$LL.2/30" dev sfl0; $NX ip link set sfl0 up
+    $NX sysctl -qw net.ipv4.ip_forward=1
+    $NX nft -f - <<EOF
+flush ruleset
+table ip sw {
+  chain prerouting {
+    type nat hook prerouting priority dstnat;
+    iifname "sfl0" udp dport $SFLOW_PORT dnat to $SIEM
+  }
+  chain postrouting {
+    type nat hook postrouting priority srcnat;
+    oifname "$M" masquerade
+  }
+  chain forward {
+    type filter hook forward priority filter; policy drop;
+    iifname "sfl0" oifname "$M" udp dport $SFLOW_PORT accept
+  }
+  chain input {
+    type filter hook input priority filter; policy drop;
+    ct state established,related accept
+    iifname "lo" accept
+    icmp type echo-request accept
+  }
+}
+EOF
+    sudo ovs-vsctl clear bridge "$S" sflow -- --id=@s create sflow agent="${IP%/*}" target="\"$LL.2:$SFLOW_PORT\"" \
+      header=128 sampling=128 polling=30 -- set bridge "$S" sflow=@s >/dev/null
+    echo "== switch $S: IP quản trị $IP (VLAN $VL), sFlow 1/128 → $SIEM:$SFLOW_PORT"
+  done < <($INV sw_mgmt)
+  # (d) RSTP mọi switch (stp_priority nhỏ = gốc), bật SAU CÙNG và bật lại mỗi lần chạy: OVS 4.0 bỏ mọi gói qua cổng bond
+  #     thêm vào lúc RSTP đang bật, đến khi RSTP bật lại (mạng ngắt vài giây)
+  for S in "${SWS[@]}"; do
+    sudo ovs-vsctl set bridge "$S" rstp_enable=false
+    sudo ovs-vsctl set bridge "$S" rstp_enable=true other_config:rstp-priority="$($INV sw_stp "$S")"
+  done
 }
 
 case "${1:-}" in
@@ -183,29 +276,14 @@ case "${1:-}" in
         done | sort -u)
     [ -z "$C" ] || { echo "!! route của máy này trùng dải lab (xoá mạng libvirt cũ: virsh net-destroy/net-undefine):"; echo "$C"; exit 1; }
     [ -s "$OPN_IMG" ] && [ -s "$UBU_IMG" ] || "$0" image
-    # (1) mạng: wan = NAT ra Internet (máy này là gateway, như đường lên nhà mạng). Vùng trong: lab_vlan_trunk → 1 switch
-    #     Open vSwitch, mỗi vùng 1 VLAN (portgroup = cổng access; trunk-<firewall> = cổng trunk các VLAN firewall đó giữ);
-    #     không trunk → mỗi vùng 1 bridge riêng. Máy này không có IP trong các vùng trong
+    # (1) mạng: wan = NAT ra Internet (máy này là gateway, như đường lên nhà mạng). Vùng trong: lab_switches → các switch
+    #     Open vSwitch, mỗi vùng 1 VLAN (hàm switches: cổng access/trunk, uplink, RSTP, IP quản trị + sFlow);
+    #     vùng không nằm trên switch nào → bridge riêng lab-<vùng>.
+    #     Máy này không có IP trong các vùng trong (IP quản trị của switch nằm trong namespace riêng)
     ZONE=""; systemctl is-active -q firewalld && ZONE=" zone='trusted'"   # firewalld: không lọc gói giữa các VM trên bridge
-    if [ "$TRUNK" = yes ] && ! V net-info "$SW" >/dev/null 2>&1; then
-      command -v ovs-vsctl >/dev/null || { echo "!! cần Open vSwitch: sudo pacman -S openvswitch && sudo systemctl enable --now ovs-vswitchd"; exit 1; }
-      sudo ovs-vsctl --may-exist add-br "$SW"
-      X="<network><name>$SW</name><forward mode='bridge'/><bridge name='$SW'/><virtualport type='openvswitch'/>"   # MTU: VM/OPNsense tự đặt lab_mtu (libvirt không nhận <mtu> cho bridge)
-      for Z in "${!VLAN[@]}"; do on_sw "$Z" && X+="<portgroup name='$Z'><vlan><tag id='${VLAN[$Z]}'/></vlan></portgroup>"; done
-      for fw in $($INV fw_names); do
-        read -r _ _ ZS _ < <($INV fw_ports "$fw" | grep ' trunk ') || continue
-        X+="<portgroup name='trunk-$fw'><vlan trunk='yes'>"
-        for Z in ${ZS//,/ }; do X+="<tag id='${VLAN[$Z]}'/>"; done
-        X+="</vlan></portgroup>"
-      done
-      V net-define <(echo "$X</network>") >/dev/null && echo "== switch $SW (Open vSwitch): $(for Z in "${!VLAN[@]}"; do on_sw "$Z" && printf '%s=VLAN %s ' "$Z" "${VLAN[$Z]}"; done)"
-    fi
-    if [ "$TRUNK" = yes ]; then
-      V net-info "$SW" | grep '^Active: *yes' >/dev/null || V net-start "$SW" >/dev/null
-      V net-autostart "$SW" >/dev/null
-    fi
+    switches
     while read -r Z CIDR GW _; do
-      on_sw "$Z" && continue
+      [ "$($INV zone_sw "$Z")" = - ] || continue
       N=$(net "$Z")
       if ! V net-info "$N" >/dev/null 2>&1; then
         X="<network><name>$N</name><bridge name='$N' stp='off'$ZONE/><mtu size='$($INV mtu)'/>"
@@ -216,18 +294,18 @@ case "${1:-}" in
       V net-autostart "$N" >/dev/null
     done < <($INV zone_list)
     # (2) VM còn thiếu: đĩa = lớp qcow2 trên image gốc. libvirt xếp card vào khe PCI trước đĩa, đúng thứ tự khai báo:
-    #     firewall (i440fx) slot 2,3,4 = vtnet0..n theo card vật lý (inventory.py fw_ports: trunk + card riêng)
+    #     firewall (i440fx) slot 2,3,4 = vtnet0..n theo card vật lý (inventory.py fw_ports: mỗi switch 1 card, ≥ 2 vùng = trunk)
     #     VM Linux: i440fx, card ở slot 4 = ens4 (giống hệt GCP). MAC theo IP đầu tiên trên card
     while read -r N KIND CPU MEM DISK ZS IPS; do
       exists "$N" && continue
       NETS=()
       if [ "$KIND" = fw ]; then
-        while read -r _ PK PZ PI; do
+        while read -r _ PK PZ PI PS; do
           [ "$PK" = trunk ] && P="trunk-$N" || P=$PZ
-          NETS+=(--network "$(port "$P"),model=virtio,mac=$(mac "${PI%%,*}")")
+          NETS+=(--network "$(port "$P" "$PS"),model=virtio,mac=$(mac "${PI%%,*}")")
         done < <($INV fw_ports "$N")
       else
-        NETS+=(--network "$(port "$ZS"),model=virtio,mac=$(mac "$IPS"),address.type=pci,address.domain=0,address.bus=0,address.slot=4")
+        NETS+=(--network "$(port "$ZS" "$($INV host_sw "$ZS")"),model=virtio,mac=$(mac "$IPS"),address.type=pci,address.domain=0,address.bus=0,address.slot=4")
       fi
       if [ "$KIND" = fw ]; then
         qemu-img create -q -f qcow2 -F qcow2 -b "$OPN_IMG" "$POOL/$N.qcow2" "${DISK}G"
@@ -276,6 +354,7 @@ case "${1:-}" in
         V domstate "$n" | grep 'shut off' >/dev/null || { echo "   $n không tự tắt → destroy"; V destroy "$n" >/dev/null; }
       done
     }
+    [ "$1" = start ] && switches   # máy này vừa khởi động lại: veth uplink, namespace quản trị mất → dựng lại
     if [ $# -gt 1 ]; then echo "== $1: ${*:2}"; act "$1" "${@:2}"; exit; fi   # chỉ các máy ghi tên
     mapfile -t TIERS < <($INV start_order)
     if [ "$1" = stop ]; then
@@ -299,10 +378,19 @@ case "${1:-}" in
   status)
     V list --all | grep -E "Name|---|$($INV vm_list | cut -d' ' -f1 | paste -sd'|')" || true
     echo; V net-list --all | grep -E 'Name|---|lab-' || true
-    if [ "$TRUNK" = yes ] && V net-info "$SW" >/dev/null 2>&1; then
-      echo; echo "Cổng trên switch $SW (VLAN: tag = access, trunks = trunk):"
-      sudo ovs-vsctl --columns=name,tag,trunks list port 2>/dev/null | paste - - - - | awk '{print "  "$3, $6, $9}' | grep -v "^  \"$SW\"" || true
-    fi ;;
+    for S in "${SWS[@]}"; do
+      sudo ovs-vsctl br-exists "$S" 2>/dev/null || continue
+      echo; echo "Switch $S (tag = cổng access, trunks = trunk/uplink):"
+      sudo ovs-appctl rstp/show "$S" | grep -q 'This bridge is the root' && echo "  (RSTP: switch này là gốc)"
+      for P in $(sudo ovs-vsctl list-ports "$S"); do   # RSTP trống: cổng bond (OVS không chạy RSTP trên bond), cổng quản trị
+        R=$(sudo ovs-vsctl --if-exists get port "$P" rstp_status:rstp_port_role rstp_status:rstp_port_state | xargs)
+        printf '  %-20s tag=%-5s trunks=%-10s RSTP %s\n' "$P" "$(sudo ovs-vsctl get port "$P" tag)" "$(sudo ovs-vsctl get port "$P" trunks)" "${R:--}"
+      done
+      for P in $(sudo ovs-vsctl list-ports "$S" | grep '^lag-'); do
+        echo "  $P: $(sudo ovs-appctl bond/show "$P" | awk '/lacp_status/{s=$2} /^member/{m=m" "$2$3} END{print "LACP "s", dây:"m}')"
+      done
+      [ -e "/run/netns/$S" ] && echo "  IP quản trị: $(sudo ip netns exec "$S" ip -br -4 addr | awk '$1~/-mgmt$/{print $3" ("$1")"}')"
+    done ;;
   purge)
     # Gỡ SẠCH dấu vết lab trên máy này: down + kết nối VPN + trạng thái máy nhà (out/ hoặc out-libvirt/). Giữ image OS gốc
     read -rp "GỠ SẠCH lab máy nhà (VM, đĩa, mạng, VPN, bí mật trong out/)? Gõ purge: " a; [ "$a" = purge ] || exit 1
@@ -326,13 +414,23 @@ case "${1:-}" in
       rm -f "$POOL/$N.qcow2" "$POOL/$N-seed.iso" "$POOL/$N-config.img"
       echo "== đã xoá $N"
     done < <($INV vm_list)
-    for N in $($INV zone_list | while read -r Z _; do net "$Z"; done) "$SW"; do
+    for N in $($INV zone_list | while read -r Z _; do net "$Z"; done) "${SWS[@]}"; do
       V net-info "$N" >/dev/null 2>&1 || continue
       V net-destroy "$N" >/dev/null 2>&1 || true; V net-undefine "$N" >/dev/null; echo "== đã xoá mạng $N"
     done
-    if command -v ovs-vsctl >/dev/null && sudo ovs-vsctl br-exists "$SW" 2>/dev/null; then
-      sudo ovs-vsctl del-br "$SW" && echo "== đã xoá switch Open vSwitch $SW"
-    fi
+    for S in "${SWS[@]}"; do   # xoá bridge chỉ gỡ cổng: veth uplink, namespace quản trị + veth sFlow phải xoá riêng
+      if command -v ovs-vsctl >/dev/null && sudo ovs-vsctl br-exists "$S" 2>/dev/null; then
+        sudo ovs-vsctl del-br "$S" && echo "== đã xoá switch Open vSwitch $S"
+      fi
+      while read -r K _ _ _ L; do
+        [ "$K" = uplink ] || continue
+        for P in ${L//,/ }; do ip link show "${P%%:*}" >/dev/null 2>&1 && sudo ip link del "${P%%:*}"; done
+      done < <($INV sw_ports "$S")
+    done
+    while read -r S M _; do
+      ip link show "${M%-mgmt}-sfl" >/dev/null 2>&1 && sudo ip link del "${M%-mgmt}-sfl"
+      [ -e "/run/netns/$S" ] && sudo ip netns del "$S" && echo "== đã xoá mạng quản trị (namespace) của $S"
+    done < <($INV sw_mgmt)
     V pool-refresh default >/dev/null 2>&1 || true
     nmcli connection down lab >/dev/null 2>&1 || true
     rm -f "$OUT"/.config-loaded-*

@@ -100,6 +100,38 @@ loki.source.syslog "net" {
   forward_to    = [loki.process.normalize.receiver]
 }
 
+{% if sflow_enabled | bool %}
+// ---------- sFlow từ switch (goflow2: mỗi mẫu gói 1 dòng JSON) ----------
+// Chỉ ghi Loki trên siem-01: số liệu lưu lượng, không phải log bảo mật cần giữ lâu
+local.file_match "sflow" {
+  path_targets = [{ __path__ = "/flows/flows.json", app = "sflow", job = "sflow" }]
+}
+
+loki.source.file "sflow" {
+  targets    = local.file_match.sflow.targets
+  forward_to = [loki.process.sflow.receiver]
+}
+
+loki.process "sflow" {
+  forward_to = [loki.write.local.receiver]
+
+  stage.json {
+    expressions = { sampler = "sampler_address", src_vlan = "src_vlan", dst_vlan = "dst_vlan", proto = "proto", src = "src_addr", dst = "dst_addr", dport = "dst_port" }
+  }
+  // VLAN: tag lúc vào switch, không có thì lúc ra; cả 2 là 0 = gói đi giữa 2 cổng access (switch không ghi tag)
+  stage.template {
+    source   = "vlan"
+    template = {% raw %}"{{ if ne .src_vlan \"0\" }}{{ .src_vlan }}{{ else if ne .dst_vlan \"0\" }}{{ .dst_vlan }}{{ else }}access{{ end }}"{% endraw %}
+  }
+  stage.labels {
+    values = { sampler = "", vlan = "" }
+  }
+  stage.structured_metadata {
+    values = { src = "", dst = "", dport = "", proto = "" }
+  }
+}
+
+{% endif %}
 // ---------- Cảnh báo của Wazuh manager (alerts.json) ----------
 local.file_match "wazuh" {
   path_targets = [{ __path__ = "/wazuh-logs/alerts/alerts.json", app = "wazuh", job = "wazuh" }]

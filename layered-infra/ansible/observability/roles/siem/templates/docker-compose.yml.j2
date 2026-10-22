@@ -17,12 +17,27 @@ services:
       - ./config.alloy:/etc/alloy/config.alloy:ro
       - ./data/alloy:/var/lib/alloy
       - wazuh_logs:/wazuh-logs:ro
+      - ./data/flows:/flows:ro
     ports:
       - "{{ mon_syslog_port }}:{{ mon_syslog_port }}/tcp"     # syslog từ OPNsense, rsyslog các máy
     depends_on: [loki]
     restart: unless-stopped
     mem_limit: 384m
 
+{% if sflow_enabled | bool %}
+  # sFlow từ switch (IP quản trị của switch, VLAN MGMT): giải mã mỗi mẫu gói thành 1 dòng JSON → Alloy → Loki (app=sflow)
+  goflow2:
+    image: {{ mon_images_extra.goflow2 }}
+    command: -listen=sflow://:{{ sflow_port }} -format=json -transport=file -transport.file=/flows/flows.json
+    user: "0"                                         # ghi vào thư mục gắn từ máy (logrotate cắt file mỗi giờ)
+    volumes:
+      - ./data/flows:/flows
+    ports:
+      - "{{ sflow_port }}:{{ sflow_port }}/udp"
+    restart: unless-stopped
+    mem_limit: 64m
+
+{% endif %}
   # Máy chủ SMTP của lab: nhận và giữ mọi email, xem ở http://{{ mon_ip }}:8025
   mailpit:
     image: {{ mon_images_extra.mailpit }}

@@ -43,10 +43,34 @@
     - { p: /opt/mon/data/alloy }
     - { p: /opt/mon/data/grafana, o: "472" }
     - { p: /opt/mon/data/mailpit, o: "1000" }
+    - { p: /opt/mon/data/flows }
     - { p: /opt/mon/grafana/provisioning/datasources }
     - { p: /opt/mon/grafana/provisioning/dashboards }
     - { p: /opt/mon/grafana/provisioning/alerting }
     - { p: /opt/mon/grafana/dashboards }
+
+- name: sFlow — cắt file JSON của goflow2 mỗi giờ khi quá 50MB (Alloy đã đọc vào Loki)
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/goflow2
+    content: |
+      /opt/mon/data/flows/flows.json {
+        size 50M
+        rotate 1
+        copytruncate
+        missingok
+        notifempty
+      }
+    mode: "0644"
+  when: sflow_enabled | bool
+
+- name: sFlow — chạy logrotate cho file đó mỗi giờ (logrotate của Ubuntu chỉ chạy mỗi ngày)
+  ansible.builtin.copy:
+    dest: /etc/cron.hourly/goflow2
+    content: |
+      #!/bin/sh
+      exec /usr/sbin/logrotate /etc/logrotate.d/goflow2
+    mode: "0755"
+  when: sflow_enabled | bool
 
 - name: Mật khẩu admin Grafana
   ansible.builtin.copy:

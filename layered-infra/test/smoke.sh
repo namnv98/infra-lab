@@ -3,7 +3,7 @@
 # Không quan tâm máy chạy ở đâu: mọi IP từ ansible/shared/inventory/hosts.yml, không hỏi bộ tạo máy.
 # Mỗi dòng: tên kiểm thử, mong đợi, thực tế → ĐẠT/LỖI. Thoát mã 1 nếu có kiểm thử lỗi (dùng được trong CI).
 #   ./test/smoke.sh            # chạy hết
-#   ./test/smoke.sh web        # chỉ nhóm có tên chứa "web" (web, vpn, egress, edge, cluster, siem)
+#   ./test/smoke.sh web        # chỉ nhóm có tên chứa "web" (web, vpn, egress, edge, cluster, prod, siem, switch)
 set -uo pipefail
 LAB=$(cd "$(dirname "$0")/.." && pwd); cd "$LAB"
 OUT="out"
@@ -106,6 +106,16 @@ if want siem; then  # log 2 firewall về Loki trên siem-01 (truy vấn từ co
   Q='http://loki:3100/loki/api/v1/query?query=count(count_over_time(%7Bhost%3D~%22firewall.*%22%7D%5B1h%5D))%20by%20(host)'
   N=$($SSH "$SIEM" "sudo docker exec mon-grafana-1 wget -qO- '$Q'" 2>/dev/null | grep -o '"host"' | wc -l)
   check siem "Loki có log của 2 firewall (1 giờ qua)" 2 "$N"
+fi
+
+SWM=$($INV sw_mgmt)   # switch có IP quản trị (lab_switches.*.mgmt, chỉ máy nhà/on-prem): trống thì bỏ qua
+if want switch && [[ -n $SWM ]]; then  # IP quản trị trong VLAN MGMT, sFlow về siem-01
+  while read -r SW _ SWIP _; do
+    check switch "jump-01 ping IP quản trị $SW" có "$($SSH "$JUMP" "ping -c2 -W2 ${SWIP%/*} >/dev/null && echo có || echo không" 2>/dev/null | tail -1)"
+  done <<<"$SWM"
+  Q='http://loki:3100/loki/api/v1/query?query=sum(count_over_time(%7Bapp%3D%22sflow%22%7D%5B15m%5D))'
+  N=$($SSH "$SIEM" "sudo docker exec mon-grafana-1 wget -qO- '$Q'" 2>/dev/null | grep -oE '"value":\[[^]]*"[0-9]+"' | grep -oE '[0-9]+"$' | tr -d '"')
+  check switch "Loki có mẫu sFlow từ switch (15 phút qua)" có "$([[ ${N:-0} -gt 0 ]] && echo có || echo "không (${N:-0})")"
 fi
 
 echo "== $PASS đạt, $FAIL lỗi"

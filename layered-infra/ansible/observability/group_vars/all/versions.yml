@@ -7,4 +7,5 @@ mon_images:
   grafana: "{{ harbor_host }}/dockerhub/grafana/grafana:13.2.4"
 mon_images_extra:
   mailpit: "{{ harbor_host }}/dockerhub/axllent/mailpit:v1.31.6"
+  goflow2: "{{ harbor_host }}/ghcr/netsampler/goflow2:v2.2.7"
 wazuh_image: "{{ harbor_host }}/dockerhub/wazuh/wazuh-manager:4.14.9"

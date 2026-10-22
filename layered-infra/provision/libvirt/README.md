@@ -33,7 +33,7 @@ Cùng dải IP nên **không bật VPN tới cả hai cùng lúc**: tắt lab m�
 
 | Lệnh | Xoá | Giữ |
 |---|---|---|
-| `make libvirt-down` | 8 VM + đĩa của chúng, mạng `lab-wan` + switch `lab-sw` (Open vSwitch) | image OS gốc (`/data/lab-images/`), `out/` |
+| `make libvirt-down` | 8 VM + đĩa của chúng, mạng `lab-wan` + các switch Open vSwitch (`sw-dmz`, `sw-core`, `sw-access`) + dây uplink (veth), namespace quản trị `sw-core` | image OS gốc (`/data/lab-images/`), `out/` |
 | `make libvirt-purge` | như `down` + kết nối VPN `lab` + trạng thái máy nhà (`out/` hoặc `out-libvirt/`) | đang ở máy nhà thì chạy thêm `make libvirt-restore` |
 
 Cả hai đọc `hosts.yml` + `provisioned.yml` cạnh đây, nên chạy được cả sau khi đã `restore` về GCP. Chỉ xoá đúng tên trong
@@ -45,30 +45,53 @@ Image OS gốc (OPNsense nano ~2GB, Ubuntu cloud image ~600MB) nằm ở `lab_im
 Cần: `libvirt` (qemu:///system, user trong nhóm `libvirt`), `openvswitch` (`ovs-vswitchd` chạy, `sudo` để tạo switch), `virt-install`, `xorriso`, `mtools`, `dosfstools`, `tmux`,
 `wireguard-tools`, khoá `~/.ssh/id_ed25519`.
 
-## Mạng — như on-prem thật: 1 switch, mỗi vùng 1 VLAN
+## Mạng — như on-prem thật: 3 switch, mỗi vùng 1 VLAN
 
 ```
- Internet ── NAT libvirt (lab-wan 10.99.0.0/24, máy này .1) ── WAN  firewall-edge-01
-                                                                     │ trunk: VLAN 10
- ┌──────────────────── Open vSwitch lab-sw ─────────────────────────┴─────────────┐
- │ VLAN 10 dmz  10.10.10.0/24   access: edge-01                                     │
- │ VLAN 20 lan  10.20.0.0/24    access: k8s-master-01, k8s-worker-01, infra-01      │
- │ VLAN 40 mgmt 10.40.0.0/24    access: jump-01, siem-01                            │
- └──────────────────────────────────────┬──────────────────────────────────────────┘
-                                         │ trunk: VLAN 10, 20, 40
-                                  firewall-core-01 (1 card: vtnet0_vlan10 / _vlan20 / _vlan40)
+ Internet ── NAT libvirt (lab-wan 10.99.0.0/24, máy này .1) ── vtnet1 WAN  firewall-edge-01
+                                                                          │ vtnet0 (DMZ, không tag)
+ ┌──────── sw-dmz (VLAN 10, không nối switch nào) ────────┐               │
+ │ cổng 1 firewall-edge-01 · cổng 2 firewall-core-01 vtnet1 · cổng 3 edge-01 │
+ └──────────────────────────────┬──────────────────────────┘
+                     firewall-core-01 vtnet1 (DMZ .252)   vtnet0 trunk 20, 40 (vtnet0_vlan20 / _vlan40)
+                                                                  │
+ ┌──────── sw-core (phân phối, gốc RSTP) ────────────────────────┴──┐
+ │ trunk firewall core · siem-01, jump-01 (access 40)                  │
+ │ core-mgmt 10.40.0.250 (IP quản trị, VLAN 40) ── sFlow 1/128 → siem-01:6343 │
+ └──────────┬──────────┬──────────────────────────────────────────────┘
+            │ 2 dây    │ lag-sw-access: LACP gộp core-access1 + core-access2, trunk CHỈ VLAN 20
+ ┌──────────┴──────────┴─ sw-access (tủ K8s) ──────────────────────────┐
+ │ k8s-master-01 · k8s-worker-01 · infra-01 (access 20)                 │
+ └──────────────────────────────────────────────────────────────────────┘
 ```
 
 | Thành phần | Cấu hình |
 |---|---|
 | `lab-wan` | mạng NAT libvirt, tách khỏi switch (như đường lên nhà mạng): biên 10.99.0.2 = IP web, 10.99.0.3 = IP VPN (Virtual IP) |
-| `lab-sw` | 1 bridge Open vSwitch + mạng libvirt cùng tên; portgroup `dmz`/`lan`/`mgmt` = cổng access, `trunk-<firewall>` = cổng trunk |
-| VLAN ID | `vlan` của từng vùng trong `hosts.yml` (GCP bỏ qua); bật bằng `lab_vlan_trunk: true` trong `provisioned.yml` |
-| Firewall | card trunk → OPNsense tạo interface VLAN `vtnet<i>_vlan<tag>`; biên: trunk (vtnet0) + WAN (vtnet1); core: chỉ vtnet0 |
+| `lab_switches` | trong `provisioned.yml`: mỗi switch khai `fw` (vùng mà card firewall cắm vào), `hosts` (vùng mà VM cắm vào), `uplink` (switch kia: VLAN cho qua, số dây), `stp_priority`, `mgmt` (IP quản trị) |
+| Switch | 1 bridge Open vSwitch + mạng libvirt cùng tên; portgroup `<vùng>` = cổng access, `trunk-<firewall>` = cổng trunk |
+| Uplink | mỗi dây 1 cặp veth (`core-access1` ↔ `access-core1`), cắm cổng cố định cuối switch (47, 48 — như uplink switch 48 cổng; cổng VM OVS cấp từ 1 theo thứ tự cắm), `vlan_mode=trunk`, `trunks` = đúng VLAN khai (cắt VLAN thừa). `links: 2` = 2 dây gộp LACP (`lag-<switch kia>`, `balance-tcp`, LACP nhanh 1 giây); thêm `lacp: false` = 2 dây riêng, RSTP chặn 1 dây |
+| RSTP | bật trên mọi switch; `stp_priority: 4096` cho sw-core = gốc (mặc định 32768). Cổng VM tự thành cổng biên (không nhận BPDU) |
+| IP quản trị | `mgmt: 10.40.0.250`: card `core-mgmt` (cổng access VLAN 40) nằm trong network namespace `sw-core` — mạng quản trị tách riêng như switch thật, máy này vẫn không có IP trong vùng nào. Ping được từ jump-01 |
+| sFlow | switch có `mgmt` gửi mẫu 1/128 gói về siem-01:6343 (goflow2 → Loki `{app="sflow"}`, dashboard *Lab · Bảo mật*). ovs-vswitchd gửi vào namespace qua veth `core-sfl` (169.254.101.x); namespace chỉ cho UDP 6343 tới siem-01 đi ra, nguồn = IP quản trị |
+| VLAN ID | `vlan` của từng vùng trong `hosts.yml` (GCP bỏ qua) |
+| Firewall | mỗi switch 1 card: ≥ 2 vùng trên cùng switch → card trunk, OPNsense tạo interface `vtnet<i>_vlan<tag>`; 1 vùng → card thường. Biên: vtnet0 DMZ + vtnet1 WAN; core: vtnet0 trunk 20/40 + vtnet1 DMZ |
 | VM | cổng access, không biết VLAN: card `ens4` (máy i440fx, khe PCI 4 như GCP) |
 
-Xem switch: `make libvirt-status` (cổng + tag/trunks) · `sudo ovs-vsctl show` · `virsh net-dumpxml lab-sw`.
-Tắt `lab_vlan_trunk` thì mỗi vùng 1 bridge riêng (`lab-dmz`, `lab-lan`, `lab-mgmt`), firewall mỗi vùng 1 card.
+`make lint` kiểm tra: mỗi vùng chỉ ở 1 switch cho firewall và 1 cho VM; VM ở switch khác firewall thì phải có uplink
+nối thẳng cho VLAN đó đi qua; IP quản trị nằm trong 1 vùng có trên switch, không trùng IP khác. Xem switch:
+`make libvirt-status` (cổng, tag/trunks, vai RSTP, trạng thái LACP, IP quản trị) · `sudo ovs-vsctl show` ·
+`sudo ovs-appctl fdb/show sw-access` (bảng MAC) · `sudo ovs-appctl bond/show lag-sw-access` · `sudo ovs-appctl rstp/show sw-access`.
+Bỏ `lab_switches` thì mỗi vùng 1 bridge riêng (`lab-dmz`, `lab-lan`, `lab-mgmt`), firewall mỗi vùng 1 card.
+
+Thử rút 1 dây uplink (đang ping từ jump-01 tới master): `sudo ip link set core-access1 down` → LACP dồn sang dây còn lại,
+không mất gói; cắm lại: `... up`. Đã đo trên lab: cả 2 chế độ (LACP, RSTP) đều 0/100 gói mất.
+
+Khác switch thật (giới hạn của Open vSwitch 4.0):
+- OVS không chạy RSTP trên cổng LACP: ở chế độ LACP cổng gộp đứng ngoài RSTP, 2 switch không trao BPDU nên switch nào cũng
+  tự là gốc (switch thật chạy STP trên port-channel). Muốn thấy bầu gốc + chặn dây thì dùng `lacp: false`.
+- Cổng bond thêm vào lúc RSTP đang bật bị bỏ gói đến khi bật lại RSTP → `up`/`start` luôn bật RSTP sau cùng (mạng ngắt vài giây).
+- veth và namespace quản trị mất khi máy này khởi động lại: `make libvirt-start` dựng lại.
 
 - GCP có router `.1` của VPC; máy nhà không có → `lab_hosting: onprem`: máy trỏ gateway thẳng vào firewall `.253` của vùng,
   `extra_routes` (DMZ → LAN/MGMT qua core `.252`) thành route tĩnh trên máy trong DMZ và trên firewall biên. Core tắt

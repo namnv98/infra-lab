@@ -3,6 +3,11 @@
 log_retention: 720h                    # Loki trên siem-01: 30 ngày
 log_archive_retention: 2160h           # Loki bản sao trên infra-01: 90 ngày
 
+# sFlow từ switch: bộ tạo máy nhà (provision/libvirt) cho switch có IP quản trị (lab_switches.*.mgmt) gửi mẫu gói về
+# siem-01:6343 (cùng VLAN MGMT, không qua firewall). Không có switch như vậy (GCP) thì không chạy bộ thu
+sflow_port: 6343
+sflow_enabled: "{{ (lab_switches | default({})).values() | selectattr('mgmt', 'defined') | list | length > 0 }}"
+
 # Email cảnh báo. Mặc định: Mailpit trên siem-01 (bắt mọi email, xem ở http://mon.lab.internal:8025).
 # Gửi ra hộp thư thật: đổi smtp_host sang SMTP thật (vd. smtp.gmail.com:587), user/password đặt ở secrets.yml.
 smtp_host: "mailpit:1025"

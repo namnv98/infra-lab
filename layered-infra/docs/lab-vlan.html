@@ -1,0 +1,1386 @@
+<title>Lab VLAN máy nhà</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: một bản vẽ rack/switch rộng ở trên, bảng VLAN và đường đi gói tin xếp dưới, cột chữ hẹp */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --fg: #1b2230; --muted: #5d6778; --line: #c9cfd9;
+  --v10: #b86e00; --v10bg: #fbefdc; --v20: #1f62c9; --v20bg: #e1ebfb; --v40: #2c8a4b; --v40bg: #dff1e5;
+  --wan: #7a4fc2; --wanbg: #ece4f8; --sw: #0b7285; --swbg: #d9f2f5;
+  --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161d; --panel: #1a2029; --fg: #e3e7ee; --muted: #9aa4b4; --line: #384252;
+  --v10: #f0a640; --v10bg: #3a2a12; --v20: #6ea3f5; --v20bg: #16263f; --v40: #5fc683; --v40bg: #14301f;
+  --wan: #b494ef; --wanbg: #2a1f3d; --sw: #4cc9d6; --swbg: #10313a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161d; --panel: #1a2029; --fg: #e3e7ee; --muted: #9aa4b4; --line: #384252;
+  --v10: #f0a640; --v10bg: #3a2a12; --v20: #6ea3f5; --v20bg: #16263f; --v40: #5fc683; --v40bg: #14301f;
+  --wan: #b494ef; --wanbg: #2a1f3d; --sw: #4cc9d6; --swbg: #10313a; color-scheme: dark }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-block: 32px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 28px; }
+h1 { font-size: 1.6rem; font-weight: 600; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.05rem; font-weight: 600; margin: 0 0 10px; }
+.lede { color: var(--muted); max-width: 68ch; margin: 6px 0 0; }
+.mono, code { font-family: var(--mono); font-size: 0.86em; }
+figure { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
+.scroll { overflow-x: auto; }
+svg { display: block; width: 100%; min-width: 760px; height: auto; color: var(--fg); }
+figure > h2 { margin: 0 0 10px; }
+figcaption { color: var(--muted); font-size: 0.9rem; margin-top: 10px; max-width: 80ch; }
+/* phần tử trong SVG */
+.box { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+.fw { fill: var(--panel); stroke: currentColor; stroke-width: 1.6; }
+.t { fill: currentColor; font-family: var(--sans); font-size: 13px; }
+.tb { fill: currentColor; font-family: var(--sans); font-size: 14px; font-weight: 600; }
+.tm { fill: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.sw { fill: var(--swbg); stroke: var(--sw); stroke-width: 1.8; }
+.swt { fill: var(--sw); font-family: var(--sans); font-size: 14px; font-weight: 700; }
+.swr { fill: var(--sw); font-size: 10.5px; font-weight: 600; letter-spacing: .06em; }
+.swm { fill: var(--fg); font-family: var(--mono); font-size: 11.5px; opacity: .8; }
+.role { fill: var(--muted); font-family: var(--sans); font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.l10 { stroke: var(--v10); } .l20 { stroke: var(--v20); } .l40 { stroke: var(--v40); } .lw { stroke: var(--wan); }
+.f10 { fill: var(--v10bg); stroke: var(--v10); } .f20 { fill: var(--v20bg); stroke: var(--v20); } .f40 { fill: var(--v40bg); stroke: var(--v40); }
+.fw-bg { fill: var(--wanbg); stroke: var(--wan); }
+.c10 { fill: var(--v10); } .c20 { fill: var(--v20); } .c40 { fill: var(--v40); } .cw { fill: var(--wan); }
+.acc { stroke-width: 2.2; fill: none; }
+.trk { stroke-width: 6; fill: none; stroke-linecap: round; }
+.lab { font-family: var(--mono); font-size: 11.5px; font-weight: 500; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+.grid2 > * { min-width: 0; }
+table { width: 100%; border-collapse: collapse; font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--muted); font-size: 0.8rem; letter-spacing: .04em; text-transform: uppercase; }
+.chip { display: inline-block; font-family: var(--mono); font-size: 0.8rem; padding: 1px 7px; border-radius: 3px; border: 1px solid; }
+.k10 { color: var(--v10); background: var(--v10bg); } .k20 { color: var(--v20); background: var(--v20bg); }
+.k40 { color: var(--v40); background: var(--v40bg); } .kw { color: var(--wan); background: var(--wanbg); }
+ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; min-width: 0; overflow-x: auto; }
+pre { margin: 0; font-family: var(--mono); font-size: 0.84rem; white-space: pre-wrap; color: var(--fg); }
+.note { color: var(--muted); font-size: 0.9rem; }
+.no { color: var(--muted); }
+.mx td, .mx th[scope=row] { font-size: 0.86rem; }
+.mx th[scope=row] { text-transform: none; letter-spacing: 0; color: var(--fg); font-weight: 500; white-space: nowrap; }
+.tc { fill: var(--muted); font-family: var(--mono); font-size: 11px; }
+.s12 { font-size: 12px; }
+.toc { margin-top: 12px; font-size: 0.92rem; }
+.toc a { color: var(--v20); }
+.toc a.hot { font-weight: 600; color: var(--v10); }
+
+/* sơ đồ zoom được: rộng theo zoom, cuộn 2 chiều trong khung, kéo để di chuyển */
+.ztool { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.ztool button { font: inherit; font-size: 0.9rem; min-width: 36px; padding: 4px 10px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+.ztool button:hover { border-color: var(--fg); }
+.ztool .zval { font-family: var(--mono); min-width: 64px; }
+.zhint { color: var(--muted); font-size: 0.82rem; margin-left: 6px; }
+.zfig, .zscroll { min-width: 0; max-width: 100%; }
+.wrap > *, .wrap section > *, .wrap header > * { min-width: 0; }   /* ô grid không nở theo hình rộng: hình tự cuộn */
+.zscroll { overflow: auto; max-height: 85vh; border: 1px solid var(--line); border-radius: 4px; cursor: grab; overscroll-behavior: contain; }
+.zscroll.drag { cursor: grabbing; user-select: none; }
+.zscroll svg.zoomable { min-width: 0; max-width: none; }
+.zlegend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 10px; font-size: 0.85rem; color: var(--muted); }
+.zlegend span { display: inline-flex; align-items: center; gap: 6px; }
+.zlegend svg { width: 36px; min-width: 0; height: 18px; flex: none; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1 id="now">Lab VLAN trên máy nhà</h1>
+    <p class="lede">Mỗi zone là một VLAN; VM cắm cổng access, firewall cắm cổng trunk. Phần đầu là bản đang chạy với 3 switch,
+      phần sau là bản trước với 1 switch <code>lab-sw</code> (các bài về VLAN, đường đi, luật vẫn đúng). Dải IP giống hệt bản GCP, chỉ khác IP public.</p>
+    <nav class="toc">
+      <a href="#sw3" class="hot">3 switch (đang chạy)</a> · <a href="#trunk">Trunk và uplink</a> · <a href="#cur">Bản trước: 1 switch</a> · <a href="#paths">Đường đi gói tin</a> · <a href="#rules">Ma trận luật</a>
+    </nav>
+  </header>
+  <section style="display:grid;gap:20px">
+    <h2 id="sw3" style="font-size:1.25rem;margin:0">3 switch (đang chạy · 35/35 test đạt)</h2>
+    <p class="lede" style="margin:0">Gần với mạng thật hơn: một switch DMZ tách vật lý, một distribution switch (sw-core) nhận trunk từ firewall, một access switch
+      (ToR, sw-access) cho tủ K8s, nối với sw-core bằng uplink trunk. Chỉ đổi phần dựng mạng của máy nhà.</p>
+
+  <figure class="zfig">
+    <div class="ztool" role="toolbar" aria-label="Phóng to, thu nhỏ sơ đồ">
+      <button type="button" data-z="out" aria-label="Thu nhỏ">−</button>
+      <button type="button" data-z="reset" class="zval" aria-label="Về 100%">100%</button>
+      <button type="button" data-z="in" aria-label="Phóng to">+</button>
+      <button type="button" data-z="fit">Vừa khung</button>
+      <span class="zhint">Ctrl + lăn chuột để zoom · kéo để di chuyển</span>
+    </div>
+    <div class="zlegend" aria-label="Chú giải">
+      <span><svg viewBox="0 0 36 18"><rect class="sw" x="1" y="1" width="34" height="16" rx="3"/></svg>switch (Open vSwitch)</span>
+      <span><svg viewBox="0 0 36 18"><rect class="fw" x="1" y="1" width="34" height="16" rx="3"/></svg>firewall (OPNsense)</span>
+      <span><svg viewBox="0 0 36 18"><rect class="box" x="1" y="1" width="34" height="16" rx="3" style="stroke:var(--v20);stroke-width:1.6"/></svg>máy (viền = VLAN)</span>
+      <span><svg viewBox="0 0 36 18"><line class="acc lw" x1="2" y1="9" x2="34" y2="9"/></svg>WAN</span>
+      <span><svg viewBox="0 0 36 18"><line class="acc l10" x1="2" y1="9" x2="34" y2="9"/></svg>VLAN 10 DMZ</span>
+      <span><svg viewBox="0 0 36 18"><line class="acc l20" x1="2" y1="9" x2="34" y2="9"/></svg>VLAN 20 LAN</span>
+      <span><svg viewBox="0 0 36 18"><line class="acc l40" x1="2" y1="9" x2="34" y2="9"/></svg>VLAN 40 MGMT</span>
+      <span><svg viewBox="0 0 36 18"><line class="trk l20" x1="4" y1="9" x2="32" y2="9"/></svg>dày = trunk (802.1Q)</span>
+      <span><svg viewBox="0 0 36 18"><line class="acc l20" x1="2" y1="9" x2="34" y2="9"/></svg>mảnh = access</span>
+      <span><svg viewBox="0 0 36 18"><line class="acc l40" x1="2" y1="9" x2="34" y2="9" stroke-dasharray="5 4"/></svg>đứt = logic</span>
+    </div>
+    <div class="zscroll" tabindex="0">
+      <svg class="zoomable" viewBox="0 0 1320 1500" width="1320" role="img" aria-label="Sơ đồ 3 switch chia theo tầng: Internet, Edge firewall-edge-01, DMZ sw-dmz với edge-01, Core firewall-core-01, Distribution sw-core với jump-01 và siem-01, Access sw-access, Server master, worker, infra-01. sw-core và sw-access nối bằng 2 dây gộp LACP cổng 47–48 chỉ mang VLAN 20.">
+      <defs><marker id="th" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <rect x="0" y="20" width="1320" height="145" fill="currentColor" opacity=".035"/>
+      <line x1="0" y1="165" x2="1320" y2="165" stroke="var(--line)" stroke-dasharray="4 5"/>
+      <text class="tc" x="20" y="50">TIER 0</text>
+      <text class="tb" x="20" y="72" style="font-size:16px">Internet</text>
+      <text class="tc" x="20" y="91">WAN · upstream ISP</text>
+      <line x1="0" y1="360" x2="1320" y2="360" stroke="var(--line)" stroke-dasharray="4 5"/>
+      <text class="tc" x="20" y="195">TIER 1</text>
+      <text class="tb" x="20" y="217" style="font-size:16px">Edge</text>
+      <text class="tc" x="20" y="236">perimeter firewall</text>
+      <rect x="0" y="360" width="1320" height="290" fill="currentColor" opacity=".035"/>
+      <line x1="0" y1="650" x2="1320" y2="650" stroke="var(--line)" stroke-dasharray="4 5"/>
+      <text class="tc" x="20" y="390">TIER 2</text>
+      <text class="tb" x="20" y="412" style="font-size:16px">DMZ</text>
+      <text class="tc" x="20" y="431">sw-dmz · VLAN 10</text>
+      <line x1="0" y1="845" x2="1320" y2="845" stroke="var(--line)" stroke-dasharray="4 5"/>
+      <text class="tc" x="20" y="680">TIER 3</text>
+      <text class="tb" x="20" y="702" style="font-size:16px">Core</text>
+      <text class="tc" x="20" y="721">core firewall</text>
+      <rect x="0" y="845" width="1320" height="310" fill="currentColor" opacity=".035"/>
+      <line x1="0" y1="1155" x2="1320" y2="1155" stroke="var(--line)" stroke-dasharray="4 5"/>
+      <text class="tc" x="20" y="875">TIER 4</text>
+      <text class="tb" x="20" y="897" style="font-size:16px">Distribution</text>
+      <text class="tc" x="20" y="916">sw-core · VLAN 20, 40</text>
+      <line x1="0" y1="1260" x2="1320" y2="1260" stroke="var(--line)" stroke-dasharray="4 5"/>
+      <text class="tc" x="20" y="1185">TIER 5</text>
+      <text class="tb" x="20" y="1207" style="font-size:16px">Access</text>
+      <text class="tc" x="20" y="1226">sw-access · VLAN 20</text>
+      <rect x="0" y="1260" width="1320" height="220" fill="currentColor" opacity=".035"/>
+      <line x1="0" y1="1480" x2="1320" y2="1480" stroke="var(--line)" stroke-dasharray="4 5"/>
+      <text class="tc" x="20" y="1290">TIER 6</text>
+      <text class="tb" x="20" y="1312" style="font-size:16px">Server</text>
+      <text class="tc" x="20" y="1331">K8s rack</text>
+      <line x1="180" y1="20" x2="180" y2="1480" stroke="var(--line)"/>
+      <rect class="box" x="200" y="62" width="130" height="44" rx="22"/>
+      <text class="tb" x="265" y="89" text-anchor="middle">Internet</text>
+      <text class="role" x="265" y="124" text-anchor="middle">upstream</text>
+      <rect class="fw-bg" x="420" y="38" width="385" height="112" rx="5" style="stroke-width:1.4"/>
+      <text class="role cw" x="436" y="58">KVM host · libvirt</text>
+      <text class="tb" x="436" y="76" style="font-size:13.5px">lab host (máy nhà)</text>
+      <text class="tm" x="436" y="98">lab-wan 10.99.0.1/24 · bridge NAT libvirt</text>
+      <text class="tm" x="436" y="115">WireGuard &quot;lab&quot; 10.50.0.2 → 10.99.0.3:51820</text>
+      <text class="tm" x="436" y="132">route dải lab vào VPN · không có IP trong VLAN nào</text>
+      <line class="acc lw" x1="330" y1="84" x2="420" y2="84" marker-end="url(#th)" marker-start="url(#th)" style="color:var(--wan)"/>
+      <text class="tc" x="375" y="76" text-anchor="middle">NAT</text>
+      <line class="acc lw" x1="500" y1="150" x2="500" y2="185"/>
+      <text class="tc" x="510" y="164.5">WAN vtnet1</text>
+      <text class="lab cw" x="510" y="180.5">10.99.0.2</text>
+      <line class="acc lw" x1="660" y1="150" x2="660" y2="185" stroke-dasharray="5 4"/>
+      <text class="tc" x="670" y="165">VPN :51820</text>
+      <rect class="fw" x="420" y="185" width="320" height="167" rx="5"/>
+      <text class="role" x="580.0" y="206" text-anchor="middle">Edge firewall · OPNsense</text>
+      <text class="tb" x="580.0" y="226" text-anchor="middle">firewall-edge-01</text>
+      <text class="tm" x="434" y="249">2 vCPU · 1.5 GB · wg 10.50.0.1/24</text>
+      <text class="tm" x="434" y="266">vtnet1 WAN 10.99.0.2/24 · VIP .3 (VPN)</text>
+      <text class="lab c10" x="434" y="283">vtnet0 DMZ .253 (không tag)</text>
+      <text class="tm" x="434" y="300">NAT nguồn DMZ/LAN/MGMT → .2</text>
+      <text class="tm" x="434" y="317">port fwd :80 :443 → edge-01</text>
+      <text class="tm" x="434" y="334">mặc định → 10.99.0.1 · DNS, NTP cho DMZ</text>
+      <rect class="box" x="840" y="200" width="420" height="130" rx="5" style="stroke-dasharray:4 4"/>
+      <text class="tb" x="856" y="224" style="font-size:13px">Vì sao chia tầng (defense in depth)</text>
+      <text class="tc" x="856" y="246">Mỗi lần xuống 1 tầng phải qua 1 thiết bị lọc:</text>
+      <text class="tc" x="856" y="262">Internet → Edge → DMZ → Core → Distribution → Access.</text>
+      <text class="tc" x="856" y="278">DMZ đứng riêng 1 switch: VLAN hopping ở</text>
+      <text class="tc" x="856" y="294">sw-dmz cũng không lọt vào LAN/MGMT.</text>
+      <text class="tc" x="856" y="310">Đường duy nhất vào trong là card DMZ của core firewall.</text>
+      <rect class="sw" x="200" y="405" width="900" height="52" rx="5"/>
+      <text class="swt" x="216" y="427">sw-dmz<tspan class="swr" dx="10">DMZ SWITCH · Open vSwitch</tspan></text>
+      <text class="swm" x="216" y="446">VLAN 10 · tách vật lý · không nối switch nào khác</text>
+      <line class="acc l10" x1="500" y1="352" x2="500" y2="405"/>
+      <text class="tc" x="510" y="375.5">cổng 1 · vtnet0</text>
+      <text class="lab c10" x="510" y="391.5">access 10</text>
+      <line class="acc l10" x1="330" y1="457" x2="330" y2="490"/>
+      <text class="tc" x="340" y="470.5">cổng 3</text>
+      <text class="lab c10" x="340" y="486.5">access 10</text>
+      <rect class="box" x="220" y="490" width="230" height="162" rx="5" style="stroke:var(--v10);stroke-width:1.6"/>
+      <rect x="220" y="490" width="230" height="5" rx="2" style="fill:var(--v10)"/>
+      <text class="role c10" x="232" y="512">Web server · reverse proxy</text>
+      <text class="tb" x="232" y="531" style="font-size:13.5px">edge-01</text>
+      <text class="tm" x="232" y="552">10.10.10.10 · ens4</text>
+      <text class="tm" x="232" y="568">1 vCPU · 1.5 GB</text>
+      <text class="t s12" x="232" y="584">HAProxy :80 :443 · WAF ModSecurity</text>
+      <text class="t s12" x="232" y="600">Wazuh agent</text>
+      <text class="t s12" x="232" y="616">route 10.20, 10.40 → .252</text>
+      <line x1="230" y1="626" x2="440" y2="626" stroke="var(--line)"/>
+      <text class="tc" x="232" y="643">gw .253 (biên)</text>
+      <line class="acc l10" x1="780" y1="457" x2="780" y2="660"/>
+      <text class="tc" x="790" y="555.5">cổng 2 · vtnet1</text>
+      <text class="lab c10" x="790" y="571.5">access 10</text>
+      <rect class="fw" x="640" y="660" width="380" height="167" rx="5"/>
+      <text class="role" x="830.0" y="681" text-anchor="middle">Core firewall · OPNsense</text>
+      <text class="tb" x="830.0" y="701" text-anchor="middle">firewall-core-01</text>
+      <text class="tm" x="654" y="724">2 vCPU · 1.5 GB · vtnet1 DMZ .252 (không tag)</text>
+      <text class="tm" x="654" y="741">vtnet0 trunk 802.1Q:</text>
+      <text class="lab c20" x="654" y="758">├ vtnet0_vlan20 .253 LAN</text>
+      <text class="lab c40" x="654" y="775">└ vtnet0_vlan40 .253 MGMT</text>
+      <text class="tm" x="654" y="792">mặc định → 10.10.10.253 · không NAT · reply-to tắt</text>
+      <text class="tm" x="654" y="809">lọc mọi lần đổi VLAN · Unbound DNS · NTP</text>
+      <rect class="box" x="200" y="670" width="390" height="150" rx="5"/>
+      <text class="tb" x="216" y="694" style="font-size:13px">VLAN và gateway</text>
+      <text class="lab c10" x="216" y="718">VLAN 10 dmz  10.10.10.0/24 · gw .253 biên</text>
+      <text class="lab c20" x="216" y="736">VLAN 20 lan  10.20.0.0/24 · gw .253 core</text>
+      <text class="tc" x="216" y="754">        VIP API .10 · MetalLB .200–.250</text>
+      <text class="lab c40" x="216" y="772">VLAN 40 mgmt 10.40.0.0/24 · gw .253 core</text>
+      <text class="tc" x="216" y="790">Máy nhận gói ở cổng access, không biết VLAN.</text>
+      <text class="tc" x="216" y="808">Chỉ firewall và uplink thấy tag.</text>
+      <line class="trk l20" x1="824" y1="826" x2="824" y2="887"/>
+      <line class="trk l40" x1="836" y1="826" x2="836" y2="887"/>
+      <text class="tc" x="850" y="852">cổng 1 · vtnet0</text>
+      <text class="lab" x="850" y="868" fill="currentColor">trunk 802.1Q · VLAN 20, 40</text>
+      <rect class="sw" x="560" y="887" width="740" height="52" rx="5"/>
+      <text class="swt" x="576" y="909">sw-core<tspan class="swr" dx="10">DISTRIBUTION SWITCH · Open vSwitch</tspan></text>
+      <text class="swm" x="576" y="928">VLAN 20, 40 · gốc RSTP (ưu tiên 4096)</text>
+      <text class="swm" x="1284" y="909" text-anchor="end">cổng 100: quản trị 10.40.0.250</text>
+      <text class="swm" x="1284" y="928" text-anchor="end">sFlow 1/128 → siem-01:6343</text>
+      <line class="acc l40" x1="1030" y1="939" x2="1030" y2="970"/>
+      <text class="tc" x="1020" y="951.5" text-anchor="end">cổng 3</text>
+      <text class="lab c40" x="1020" y="967.5" text-anchor="end">access 40</text>
+      <line class="acc l40" x1="1210" y1="939" x2="1210" y2="970"/>
+      <text class="tc" x="1200" y="951.5" text-anchor="end">cổng 2</text>
+      <text class="lab c40" x="1200" y="967.5" text-anchor="end">access 40</text>
+      <rect class="box" x="950" y="970" width="165" height="146" rx="5" style="stroke:var(--v40);stroke-width:1.6"/>
+      <rect x="950" y="970" width="165" height="5" rx="2" style="fill:var(--v40)"/>
+      <text class="role c40" x="962" y="992">Bastion host</text>
+      <text class="tb" x="962" y="1011" style="font-size:13.5px">jump-01</text>
+      <text class="tm" x="962" y="1032">10.40.0.20 · ens4</text>
+      <text class="tm" x="962" y="1048">1 vCPU · 1 GB</text>
+      <text class="t s12" x="962" y="1064">SSH bastion :22</text>
+      <text class="t s12" x="962" y="1080">ProxyJump → máy khác</text>
+      <line x1="960" y1="1090" x2="1105" y2="1090" stroke="var(--line)"/>
+      <text class="tc" x="962" y="1107">gw .253 (core)</text>
+      <rect class="box" x="1130" y="970" width="170" height="162" rx="5" style="stroke:var(--v40);stroke-width:1.6"/>
+      <rect x="1130" y="970" width="170" height="5" rx="2" style="fill:var(--v40)"/>
+      <text class="role c40" x="1142" y="992">SIEM · monitoring</text>
+      <text class="tb" x="1142" y="1011" style="font-size:13.5px">siem-01</text>
+      <text class="tm" x="1142" y="1032">10.40.0.10 · ens4</text>
+      <text class="tm" x="1142" y="1048">2 vCPU · 4 GB</text>
+      <text class="t s12" x="1142" y="1064">Alloy · Loki · Grafana</text>
+      <text class="t s12" x="1142" y="1080">Wazuh :1515 :1516</text>
+      <text class="t s12" x="1142" y="1096">goflow2 sFlow :6343</text>
+      <line x1="1140" y1="1106" x2="1290" y2="1106" stroke="var(--line)"/>
+      <text class="tc" x="1142" y="1123">gw .253 (core)</text>
+      <line class="acc l40" x1="800" y1="939" x2="800" y2="970" stroke-dasharray="3 3"/>
+      <rect class="box" x="695" y="970" width="242" height="110" rx="5" style="stroke:var(--v40);stroke-dasharray:4 3"/>
+      <text class="role c40" x="707" y="990">Management plane</text>
+      <text class="tb" x="707" y="1008" style="font-size:13px">core-mgmt (cổng 100)</text>
+      <text class="tc" x="707" y="1028">10.40.0.250/24 · gw .253</text>
+      <text class="tc" x="707" y="1044">namespace sw-core (tách máy nhà)</text>
+      <text class="tc" x="707" y="1060">nft: chỉ UDP 6343 → siem-01</text>
+      <polyline points="812,1080 812,1146 1215,1146 1215,1136" fill="none" stroke="var(--v40)" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#th)" style="color:var(--v40)"/>
+      <text class="tc" x="826" y="1140">sFlow UDP 6343 → Loki</text>
+      <line class="trk l20" x1="604" y1="939" x2="604" y2="1187"/>
+      <line class="trk l20" x1="620" y1="939" x2="620" y2="1187"/>
+      <text class="tb" x="590" y="990" text-anchor="end" style="font-size:13px">uplink · 2 dây</text>
+      <text class="tc" x="590" y="1008" text-anchor="end">sw-core cổng 47–48</text>
+      <text class="tc" x="590" y="1026" text-anchor="end">⇅ sw-access cổng 47–48</text>
+      <text class="tc" x="590" y="1044" text-anchor="end">LACP lag-sw-access (balance-tcp)</text>
+      <text class="lab c20" x="590" y="1062" text-anchor="end">trunk: chỉ VLAN 20</text>
+      <text class="tc" x="590" y="1080" text-anchor="end">rút 1 dây: 0/100 gói mất</text>
+      <rect class="sw" x="560" y="1187" width="740" height="52" rx="5"/>
+      <text class="swt" x="576" y="1209">sw-access<tspan class="swr" dx="10">ACCESS SWITCH (ToR) · Open vSwitch</tspan></text>
+      <text class="swm" x="576" y="1228">tủ K8s · chỉ VLAN 20</text>
+      <text class="swm" x="1284" y="1209" text-anchor="end">cổng 47–48: uplink lên sw-core</text>
+      <line class="acc l20" x1="700" y1="1239" x2="700" y2="1280"/>
+      <text class="tc" x="710" y="1256.5">cổng 1</text>
+      <text class="lab c20" x="710" y="1272.5">access 20</text>
+      <rect class="box" x="600" y="1280" width="215" height="162" rx="5" style="stroke:var(--v20);stroke-width:1.6"/>
+      <rect x="600" y="1280" width="215" height="5" rx="2" style="fill:var(--v20)"/>
+      <text class="role c20" x="612" y="1302">K8s control plane</text>
+      <text class="tb" x="612" y="1321" style="font-size:13.5px">k8s-master-01</text>
+      <text class="tm" x="612" y="1342">10.20.0.11 · ens4</text>
+      <text class="tm" x="612" y="1358">2 vCPU · 3 GB</text>
+      <text class="t s12" x="612" y="1374">kube-apiserver :6443</text>
+      <text class="t s12" x="612" y="1390">etcd · kube-vip</text>
+      <text class="t s12" x="612" y="1406">VIP API .10</text>
+      <line x1="610" y1="1416" x2="805" y2="1416" stroke="var(--line)"/>
+      <text class="tc" x="612" y="1433">gw .253 (core)</text>
+      <line class="acc l20" x1="935" y1="1239" x2="935" y2="1280"/>
+      <text class="tc" x="945" y="1256.5">cổng 2</text>
+      <text class="lab c20" x="945" y="1272.5">access 20</text>
+      <rect class="box" x="835" y="1280" width="215" height="162" rx="5" style="stroke:var(--v20);stroke-width:1.6"/>
+      <rect x="835" y="1280" width="215" height="5" rx="2" style="fill:var(--v20)"/>
+      <text class="role c20" x="847" y="1302">K8s worker</text>
+      <text class="tb" x="847" y="1321" style="font-size:13.5px">k8s-worker-01</text>
+      <text class="tm" x="847" y="1342">10.20.0.21 · ens4</text>
+      <text class="tm" x="847" y="1358">4 vCPU · 5 GB</text>
+      <text class="t s12" x="847" y="1374">Cilium · pod app</text>
+      <text class="t s12" x="847" y="1390">Gateway public .200</text>
+      <text class="t s12" x="847" y="1406">Gateway int. .210</text>
+      <line x1="845" y1="1416" x2="1040" y2="1416" stroke="var(--line)"/>
+      <text class="tc" x="847" y="1433">gw .253 (core)</text>
+      <line class="acc l20" x1="1170" y1="1239" x2="1170" y2="1280"/>
+      <text class="tc" x="1180" y="1256.5">cổng 3</text>
+      <text class="lab c20" x="1180" y="1272.5">access 20</text>
+      <rect class="box" x="1070" y="1280" width="215" height="162" rx="5" style="stroke:var(--v20);stroke-width:1.6"/>
+      <rect x="1070" y="1280" width="215" height="5" rx="2" style="fill:var(--v20)"/>
+      <text class="role c20" x="1082" y="1302">Shared services</text>
+      <text class="tb" x="1082" y="1321" style="font-size:13.5px">infra-01</text>
+      <text class="tm" x="1082" y="1342">10.20.0.30 · ens4</text>
+      <text class="tm" x="1082" y="1358">2 vCPU · 4 GB</text>
+      <text class="t s12" x="1082" y="1374">Harbor :443 · Squid :3128</text>
+      <text class="t s12" x="1082" y="1390">Garage S3 :3900</text>
+      <text class="t s12" x="1082" y="1406">Loki bản sao :3100</text>
+      <line x1="1080" y1="1416" x2="1275" y2="1416" stroke="var(--line)"/>
+      <text class="tc" x="1082" y="1433">gw .253 (core)</text>
+      <rect class="box" x="200" y="1290" width="360" height="92" rx="5" style="stroke:var(--v20);stroke-dasharray:4 4"/>
+      <text class="t" x="380" y="1315" text-anchor="middle">Trong cluster (Cilium, chạy trong VLAN 20)</text>
+      <text class="tc" x="380" y="1337" text-anchor="middle">pod 10.244.0.0/16 · service 10.96.0.0/12</text>
+      <text class="tc" x="380" y="1357" text-anchor="middle">cổng VM: OVS cấp từ 1 theo thứ tự cắm</text>
+      <text class="tc" x="380" y="1373" text-anchor="middle">(đổi khi VM bật lại); uplink cố định 47–48</text>
+      </svg>
+    </div>
+    <figcaption>Đọc từ trên xuống theo tầng: mỗi lần xuống một tầng phải qua một thiết bị lọc. sw-dmz (DMZ tier) đứng riêng; core firewall
+      nối lên sw-dmz bằng card DMZ và xuống sw-core (distribution) bằng trunk 20, 40; sw-core nối sw-access (access, ToR) bằng 2 dây gộp
+      LACP chỉ mang VLAN 20.</figcaption>
+  </figure>
+
+  <figure>
+    <h2>Đường đi qua nhiều switch</h2>
+    <div class="scroll">
+      <svg viewBox="0 0 1000 452" role="img" aria-label="Bốn đường đi qua 3 switch, mỗi chặng ghi cổng vào và ra, mũi tên tô màu theo VLAN, mũi tên dày là đoạn có tag.">
+      <defs><marker id="s3c" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <text class="tb" x="20" y="24" style="font-size:13px">A · edge-01 → app (10 → 20)</text>
+      <rect class="box" x="20" y="36" width="112" height="46" rx="4"/>
+      <text class="tb" x="76" y="55" text-anchor="middle" style="font-size:12.5px">edge-01</text>
+      <text class="tc" x="76" y="72" text-anchor="middle" style="font-size:10.5px">.10.10</text>
+      <line class="l10" x1="135" y1="59" x2="186" y2="59" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v10)"/>
+      <text class="lab c10" x="160" y="51" text-anchor="middle" style="font-size:10.5px">10</text>
+      <rect class="sw" x="190" y="36" width="112" height="46" rx="4"/>
+      <text class="swt" x="246" y="55" text-anchor="middle" style="font-size:12.5px">sw-dmz</text>
+      <text class="swm" x="246" y="72" text-anchor="middle" style="font-size:10.5px">cổng 3 → 2</text>
+      <line class="l10" x1="305" y1="59" x2="355" y2="59" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v10)"/>
+      <text class="lab c10" x="330" y="51" text-anchor="middle" style="font-size:10.5px">10</text>
+      <rect class="fw" x="359" y="36" width="112" height="46" rx="4"/>
+      <text class="tb" x="415" y="55" text-anchor="middle" style="font-size:12.5px">fw-core</text>
+      <text class="tc" x="415" y="72" text-anchor="middle" style="font-size:10.5px">vtnet1 → vlan20</text>
+      <line class="l20" x1="474" y1="59" x2="525" y2="59" stroke-width="5" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="500" y="51" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="sw" x="529" y="36" width="112" height="46" rx="4"/>
+      <text class="swt" x="585" y="55" text-anchor="middle" style="font-size:12.5px">sw-core</text>
+      <text class="swm" x="585" y="72" text-anchor="middle" style="font-size:10.5px">cổng 1 → 47</text>
+      <line class="l20" x1="644" y1="59" x2="694" y2="59" stroke-width="5" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="669" y="51" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="sw" x="698" y="36" width="112" height="46" rx="4"/>
+      <text class="swt" x="754" y="55" text-anchor="middle" style="font-size:12.5px">sw-access</text>
+      <text class="swm" x="754" y="72" text-anchor="middle" style="font-size:10.5px">cổng 47 → 2</text>
+      <line class="l20" x1="813" y1="59" x2="864" y2="59" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="839" y="51" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="box" x="868" y="36" width="112" height="46" rx="4"/>
+      <text class="tb" x="924" y="55" text-anchor="middle" style="font-size:12.5px">worker-01</text>
+      <text class="tc" x="924" y="72" text-anchor="middle" style="font-size:10.5px">Gateway .200</text>
+      <text class="tc" x="20" y="102">core lọc (luật 10: edge-01 → Gateway public :443). Đi qua cả 3 switch, nhưng sw-dmz và sw-core không bao giờ nối trực tiếp.</text>
+      <text class="tb" x="20" y="134" style="font-size:13px">B · jump-01 → master (40 → 20)</text>
+      <rect class="box" x="20" y="146" width="112" height="46" rx="4"/>
+      <text class="tb" x="76" y="165" text-anchor="middle" style="font-size:12.5px">jump-01</text>
+      <text class="tc" x="76" y="182" text-anchor="middle" style="font-size:10.5px">.40.20</text>
+      <line class="l40" x1="135" y1="169" x2="186" y2="169" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v40)"/>
+      <text class="lab c40" x="160" y="161" text-anchor="middle" style="font-size:10.5px">40</text>
+      <rect class="sw" x="190" y="146" width="112" height="46" rx="4"/>
+      <text class="swt" x="246" y="165" text-anchor="middle" style="font-size:12.5px">sw-core</text>
+      <text class="swm" x="246" y="182" text-anchor="middle" style="font-size:10.5px">cổng 3 → 1</text>
+      <line class="l40" x1="305" y1="169" x2="355" y2="169" stroke-width="5" marker-end="url(#s3c)" style="color:var(--v40)"/>
+      <text class="lab c40" x="330" y="161" text-anchor="middle" style="font-size:10.5px">40</text>
+      <rect class="fw" x="359" y="146" width="112" height="46" rx="4"/>
+      <text class="tb" x="415" y="165" text-anchor="middle" style="font-size:12.5px">fw-core</text>
+      <text class="tc" x="415" y="182" text-anchor="middle" style="font-size:10.5px">vlan40 → vlan20</text>
+      <line class="l20" x1="474" y1="169" x2="525" y2="169" stroke-width="5" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="500" y="161" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="sw" x="529" y="146" width="112" height="46" rx="4"/>
+      <text class="swt" x="585" y="165" text-anchor="middle" style="font-size:12.5px">sw-core</text>
+      <text class="swm" x="585" y="182" text-anchor="middle" style="font-size:10.5px">cổng 1 → 48</text>
+      <line class="l20" x1="644" y1="169" x2="694" y2="169" stroke-width="5" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="669" y="161" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="sw" x="698" y="146" width="112" height="46" rx="4"/>
+      <text class="swt" x="754" y="165" text-anchor="middle" style="font-size:12.5px">sw-access</text>
+      <text class="swm" x="754" y="182" text-anchor="middle" style="font-size:10.5px">cổng 48 → 1</text>
+      <line class="l20" x1="813" y1="169" x2="864" y2="169" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="839" y="161" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="box" x="868" y="146" width="112" height="46" rx="4"/>
+      <text class="tb" x="924" y="165" text-anchor="middle" style="font-size:12.5px">master-01</text>
+      <text class="tc" x="924" y="182" text-anchor="middle" style="font-size:10.5px">.20.11 :22</text>
+      <text class="tc" x="20" y="212">sw-core gặp gói 2 lần: lần đầu tag 40 lên firewall, lần sau tag 20 quay xuống rồi đẩy qua uplink (luật 205: jump → máy trong).</text>
+      <text class="tb" x="20" y="244" style="font-size:13px">C · master → worker (cùng VLAN 20)</text>
+      <rect class="box" x="20" y="256" width="112" height="46" rx="4"/>
+      <text class="tb" x="76" y="275" text-anchor="middle" style="font-size:12.5px">master-01</text>
+      <text class="tc" x="76" y="292" text-anchor="middle" style="font-size:10.5px">.20.11</text>
+      <line class="l20" x1="135" y1="279" x2="440" y2="279" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="288" y="271" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="sw" x="444" y="256" width="112" height="46" rx="4"/>
+      <text class="swt" x="500" y="275" text-anchor="middle" style="font-size:12.5px">sw-access</text>
+      <text class="swm" x="500" y="292" text-anchor="middle" style="font-size:10.5px">cổng 1 → 2</text>
+      <line class="l20" x1="559" y1="279" x2="864" y2="279" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="712" y="271" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="box" x="868" y="256" width="112" height="46" rx="4"/>
+      <text class="tb" x="924" y="275" text-anchor="middle" style="font-size:12.5px">worker-01</text>
+      <text class="tc" x="924" y="292" text-anchor="middle" style="font-size:10.5px">.20.21</text>
+      <text class="tc" x="20" y="322">Chỉ sw-access làm việc, không lên uplink. Riêng ARP broadcast vẫn lan qua uplink lên sw-core và trunk của core (tag 20).</text>
+      <text class="tb" x="20" y="354" style="font-size:13px">D · infra-01 → Internet (20 → 10 → WAN)</text>
+      <rect class="box" x="20" y="366" width="112" height="46" rx="4"/>
+      <text class="tb" x="76" y="385" text-anchor="middle" style="font-size:12.5px">infra-01</text>
+      <text class="tc" x="76" y="402" text-anchor="middle" style="font-size:10.5px">.20.30</text>
+      <line class="l20" x1="135" y1="389" x2="157" y2="389" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="146" y="381" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="sw" x="161" y="366" width="112" height="46" rx="4"/>
+      <text class="swt" x="217" y="385" text-anchor="middle" style="font-size:12.5px">sw-access</text>
+      <text class="swm" x="217" y="402" text-anchor="middle" style="font-size:10.5px">cổng 3 → 47</text>
+      <line class="l20" x1="276" y1="389" x2="299" y2="389" stroke-width="5" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="288" y="381" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="sw" x="303" y="366" width="112" height="46" rx="4"/>
+      <text class="swt" x="359" y="385" text-anchor="middle" style="font-size:12.5px">sw-core</text>
+      <text class="swm" x="359" y="402" text-anchor="middle" style="font-size:10.5px">cổng 47 → 1</text>
+      <line class="l20" x1="418" y1="389" x2="440" y2="389" stroke-width="5" marker-end="url(#s3c)" style="color:var(--v20)"/>
+      <text class="lab c20" x="429" y="381" text-anchor="middle" style="font-size:10.5px">20</text>
+      <rect class="fw" x="444" y="366" width="112" height="46" rx="4"/>
+      <text class="tb" x="500" y="385" text-anchor="middle" style="font-size:12.5px">fw-core</text>
+      <text class="tc" x="500" y="402" text-anchor="middle" style="font-size:10.5px">vlan20 → vtnet1</text>
+      <line class="l10" x1="559" y1="389" x2="581" y2="389" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v10)"/>
+      <text class="lab c10" x="570" y="381" text-anchor="middle" style="font-size:10.5px">10</text>
+      <rect class="sw" x="585" y="366" width="112" height="46" rx="4"/>
+      <text class="swt" x="641" y="385" text-anchor="middle" style="font-size:12.5px">sw-dmz</text>
+      <text class="swm" x="641" y="402" text-anchor="middle" style="font-size:10.5px">cổng 2 → 1</text>
+      <line class="l10" x1="700" y1="389" x2="723" y2="389" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--v10)"/>
+      <text class="lab c10" x="712" y="381" text-anchor="middle" style="font-size:10.5px">10</text>
+      <rect class="fw" x="727" y="366" width="112" height="46" rx="4"/>
+      <text class="tb" x="783" y="385" text-anchor="middle" style="font-size:12.5px">fw-edge</text>
+      <text class="tc" x="783" y="402" text-anchor="middle" style="font-size:10.5px">NAT → .2</text>
+      <line class="lw" x1="842" y1="389" x2="864" y2="389" stroke-width="2.2" marker-end="url(#s3c)" style="color:var(--wan)"/>
+      <text class="lab cw" x="853" y="381" text-anchor="middle" style="font-size:10.5px">WAN</text>
+      <rect class="box" x="868" y="366" width="112" height="46" rx="4"/>
+      <text class="tb" x="924" y="385" text-anchor="middle" style="font-size:12.5px">Internet</text>
+      <text class="tc" x="924" y="402" text-anchor="middle" style="font-size:10.5px">lab-wan</text>
+      <text class="tc" x="20" y="432">core lọc (luật 140: infra-01 → 80/443) rồi gửi qua card DMZ riêng; biên NAT nguồn 10.20.0.30 → 10.99.0.2.</text>
+      </svg>
+    </div>
+    <figcaption>Màu mũi tên = VLAN; mũi tên dày = đoạn mang tag (trunk, uplink), mũi tên mảnh = cổng access hoặc card không tag. Mỗi ô switch
+      ghi cổng vào → cổng ra.</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Cổng (số thật từ <code>ovs-ofctl show</code>)</h2>
+      <table>
+        <thead><tr><th>Switch</th><th>Cổng</th><th>Nối tới</th><th>Chế độ</th></tr></thead>
+        <tbody>
+          <tr><td rowspan="3" class="mono">sw-dmz</td><td class="mono">1</td><td>firewall-edge-01 vtnet0</td><td><span class="chip k10">access 10</span></td></tr>
+          <tr><td class="mono">2</td><td>firewall-core-01 vtnet1</td><td><span class="chip k10">access 10</span></td></tr>
+          <tr><td class="mono">3</td><td>edge-01</td><td><span class="chip k10">access 10</span></td></tr>
+          <tr><td rowspan="5" class="mono">sw-core</td><td class="mono">1</td><td>firewall-core-01 vtnet0</td><td>trunk <span class="chip k20">20</span> <span class="chip k40">40</span></td></tr>
+          <tr><td class="mono">2</td><td>siem-01</td><td><span class="chip k40">access 40</span></td></tr>
+          <tr><td class="mono">3</td><td>jump-01</td><td><span class="chip k40">access 40</span></td></tr>
+          <tr><td class="mono">47, 48</td><td>uplink → sw-access: <span class="mono">lag-sw-access</span> (LACP, 2 dây)</td><td>trunk <span class="chip k20">20</span></td></tr>
+          <tr><td class="mono">100</td><td>core-mgmt: IP quản trị 10.40.0.250 (namespace riêng) · gửi sFlow</td><td><span class="chip k40">access 40</span></td></tr>
+          <tr><td rowspan="4" class="mono">sw-access</td><td class="mono">1</td><td>k8s-master-01</td><td><span class="chip k20">access 20</span></td></tr>
+          <tr><td class="mono">2</td><td>k8s-worker-01</td><td><span class="chip k20">access 20</span></td></tr>
+          <tr><td class="mono">3</td><td>infra-01</td><td><span class="chip k20">access 20</span></td></tr>
+          <tr><td class="mono">47, 48</td><td>uplink → sw-core: <span class="mono">lag-sw-core</span> (LACP, 2 dây)</td><td>trunk <span class="chip k20">20</span></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Đổi gì so với bây giờ</h2>
+      <table>
+        <thead><tr><th></th><th>1 switch (hiện tại)</th><th>3 switch</th></tr></thead>
+        <tbody>
+          <tr><td>Switch</td><td class="mono">lab-sw</td><td class="mono">sw-dmz, sw-core, sw-access</td></tr>
+          <tr><td>Biên</td><td>trunk <span class="mono">vtnet0_vlan10</span></td><td>card thường <span class="mono">vtnet0</span></td></tr>
+          <tr><td>Core</td><td>1 card trunk 10, 20, 40</td><td>trunk 20, 40 (<span class="mono">vtnet0</span>) + card DMZ (<span class="mono">vtnet1</span>)</td></tr>
+          <tr><td>Nối switch</td><td>không có</td><td>uplink trunk 20, 2 dây gộp LACP · RSTP · IP quản trị + sFlow</td></tr>
+          <tr><td>VM, IP, luật</td><td colspan="2">giữ nguyên; GCP không đổi</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Cấu hình: switch nào có những máy nào, và VLAN nào được chạy qua uplink, khai trong
+        <code>provision/libvirt/provisioned.yml</code>; <code>libvirt.sh</code> dựng switch, uplink (cặp veth, LACP), RSTP, IP quản trị + sFlow, <code>inventory.py</code> nhóm card
+        firewall theo switch.</p>
+      <p class="note">Khác switch thật: Open vSwitch không chạy RSTP trên cổng LACP, nên ở chế độ LACP hai switch không trao BPDU
+        qua uplink (switch nào cũng tự là gốc). Switch thật chạy STP trên port-channel. Muốn thấy bầu gốc và chặn dây thì dùng <code>lacp: false</code>.</p>
+      <h2 style="margin-top:14px">Bài tập sự cố làm được</h2>
+      <ol>
+        <li>Bỏ VLAN 20 khỏi uplink: K8s mất đường ra firewall nhưng master ↔ worker vẫn nói chuyện được.</li>
+        <li>Thêm nhầm VLAN 40 vào sw-dmz: không lan sang trong được vì không có dây nối.</li>
+        <li>Rút 1 dây uplink (<code>sudo ip link set core-access1 down</code>) lúc đang ping master: LACP dồn sang dây còn lại, không mất gói (đã đo: 0/100). Rút cả 2 dây: xem cảnh báo nào hiện ở SIEM trước.</li>
+        <li>Đổi uplink sang <code>lacp: false</code>, chạy <code>make libvirt-start</code>: sw-core được bầu làm gốc RSTP, sw-access chặn 1 dây (Alternate). Rút dây đang dùng: dây kia lên Root, cũng không mất gói.</li>
+        <li>Xem lưu lượng theo VLAN ở Grafana (dashboard <em>Lab · Bảo mật</em>, sFlow): kéo 1 image lớn qua Harbor và xem VLAN 20 tăng.</li>
+      </ol>
+    </section>
+  </div>
+  </section>
+
+
+
+
+<!-- trunk-uplink -->
+  <h2 id="trunk" style="font-size:1.25rem;margin:8px 0 0">Trunk và uplink là gì</h2>
+  <p class="lede" style="margin:0">Hai khái niệm trả lời hai câu hỏi khác nhau: <strong>trunk</strong> là cổng mang VLAN <em>như thế nào</em>
+    (nhiều VLAN, có tag); <strong>uplink</strong> là dây nối <em>đi đâu</em> (từ switch tầng dưới lên switch tầng trên).</p>
+
+  <figure>
+    <div class="scroll">
+      <svg viewBox="0 0 1110 310" role="img" aria-label="Firewall core nối sw-core bằng trunk mang VLAN 20 và 40, khung có tag. sw-core nối sw-access bằng uplink 2 dây LACP, là trunk chỉ mang VLAN 20. Cổng access tới máy chủ không có tag.">
+      <rect class="fw" x="20" y="40" width="190" height="108" rx="5"/>
+      <text class="role" x="115" y="60" text-anchor="middle">Core firewall</text>
+      <text class="tb" x="115" y="80" text-anchor="middle">firewall-core-01</text>
+      <text class="tc" x="32" y="104">1 card vtnet0, đọc tag:</text>
+      <text class="lab c20" x="32" y="122">vtnet0_vlan20 · LAN</text>
+      <text class="lab c40" x="32" y="139">vtnet0_vlan40 · MGMT</text>
+      <line class="trk l20" x1="210" y1="84" x2="390" y2="84"/>
+      <line class="trk l40" x1="210" y1="98" x2="390" y2="98"/>
+      <text class="role" x="300" y="44" text-anchor="middle">TRUNK</text>
+      <text class="tc" x="300" y="62" text-anchor="middle">VLAN 20, 40 · cổng 1</text>
+      <rect x="250" y="114" width="46" height="20" rx="2" class="f20"/>
+      <text class="lab c20" x="273" y="128" text-anchor="middle" style="font-size:10.5px">tag 20</text>
+      <rect x="296" y="114" width="54" height="20" rx="2" class="box"/>
+      <text class="tc" x="323" y="128" text-anchor="middle" style="font-size:10.5px">dữ liệu</text>
+      <rect x="250" y="140" width="46" height="20" rx="2" class="f40"/>
+      <text class="lab c40" x="273" y="154" text-anchor="middle" style="font-size:10.5px">tag 40</text>
+      <rect x="296" y="140" width="54" height="20" rx="2" class="box"/>
+      <text class="tc" x="323" y="154" text-anchor="middle" style="font-size:10.5px">dữ liệu</text>
+      <rect class="sw" x="390" y="66" width="150" height="52" rx="5"/>
+      <text class="swt" x="406" y="88">sw-core</text>
+      <text class="swm" x="406" y="107">distribution</text>
+      <line class="trk l20" x1="540" y1="84" x2="770" y2="84"/>
+      <line class="trk l20" x1="540" y1="100" x2="770" y2="100"/>
+      <text class="role" x="655" y="44" text-anchor="middle">UPLINK = TRUNK</text>
+      <text class="tc" x="655" y="62" text-anchor="middle">chỉ VLAN 20 · 2 dây LACP · cổng 47–48</text>
+      <rect x="605" y="114" width="46" height="20" rx="2" class="f20"/>
+      <text class="lab c20" x="628" y="128" text-anchor="middle" style="font-size:10.5px">tag 20</text>
+      <rect x="651" y="114" width="54" height="20" rx="2" class="box"/>
+      <text class="tc" x="678" y="128" text-anchor="middle" style="font-size:10.5px">dữ liệu</text>
+      <text class="tc" x="655" y="156" text-anchor="middle">VLAN 40 bị cắt (pruning)</text>
+      <rect class="sw" x="770" y="66" width="150" height="52" rx="5"/>
+      <text class="swt" x="786" y="88">sw-access</text>
+      <text class="swm" x="786" y="107">access (ToR)</text>
+      <line class="acc l20" x1="920" y1="92" x2="970" y2="92"/>
+      <text class="role" x="945" y="44" text-anchor="middle">ACCESS</text>
+      <text class="lab c20" x="945" y="62" text-anchor="middle">VLAN 20</text>
+      <rect x="918" y="114" width="54" height="20" rx="2" class="box"/>
+      <text class="tc" x="945" y="128" text-anchor="middle" style="font-size:10.5px">dữ liệu</text>
+      <rect class="box" x="970" y="66" width="125" height="52" rx="5" style="stroke:var(--v20);stroke-width:1.6"/>
+      <text class="tb" x="982" y="88" style="font-size:12.5px">k8s-master-01</text>
+      <text class="tc" x="982" y="106">không biết VLAN</text>
+      <line class="acc l40" x1="465" y1="118" x2="465" y2="230"/>
+      <text class="lab c40" x="455" y="186" text-anchor="end">ACCESS · VLAN 40</text>
+      <rect x="401" y="194" width="54" height="20" rx="2" class="box"/>
+      <text class="tc" x="428" y="208" text-anchor="middle" style="font-size:10.5px">dữ liệu</text>
+      <rect class="box" x="400" y="230" width="130" height="52" rx="5" style="stroke:var(--v40);stroke-width:1.6"/>
+      <text class="tb" x="412" y="252" style="font-size:12.5px">siem-01</text>
+      <text class="tc" x="412" y="270">không biết VLAN</text>
+      <text class="tc" x="600" y="228">Trunk: nhiều VLAN trên 1 dây, mỗi khung mang tag 802.1Q.</text>
+      <text class="tc" x="600" y="248">Uplink: dây nối switch tầng dưới lên tầng trên (gần như luôn là trunk).</text>
+      <text class="tc" x="600" y="268">Access: 1 VLAN, switch bỏ tag trước khi đưa tới máy.</text>
+      </svg>
+    </div>
+    <figcaption>Một khung từ firewall core đi tới máy: trên trunk có tag (20 hoặc 40), qua uplink chỉ còn VLAN 20 được đi,
+      tới cổng access thì switch bỏ tag. Máy chủ nhận khung Ethernet bình thường, không biết mình ở VLAN nào.</figcaption>
+  </figure>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Trunk: cổng mang nhiều VLAN</h2>
+      <table>
+        <thead><tr><th></th><th>Access</th><th>Trunk</th></tr></thead>
+        <tbody>
+          <tr><td>Số VLAN</td><td>1</td><td>nhiều</td></tr>
+          <tr><td>Khung trên dây</td><td>không tag — thiết bị không biết VLAN</td><td>có tag 802.1Q (4 byte ghi số VLAN, <a href="#tag8021q">xem ⑥</a>)</td></tr>
+          <tr><td>Cắm vào</td><td>máy chủ, PC</td><td>switch khác, firewall, router</td></tr>
+          <tr><td>Trong lab</td><td>jump-01, siem-01, master, worker…</td><td>firewall core ↔ sw-core · sw-core ↔ sw-access</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Firewall core chỉ có <strong>1 card</strong> <code>vtnet0</code> cắm vào sw-core nhưng phục vụ cả LAN và MGMT: switch
+        gắn tag 20 hoặc 40, firewall đọc tag và tách thành <code>vtnet0_vlan20</code> và <code>vtnet0_vlan40</code>. Một sợi dây chở 2 mạng
+        mà không lẫn — mô hình <em>router-on-a-stick</em>.</p>
+    </section>
+    <section class="card">
+      <h2>Uplink: dây nối lên tầng trên</h2>
+      <p>Uplink nói về <strong>vị trí</strong> của dây trong sơ đồ: switch tầng dưới nối lên tầng trên (Access → Distribution → Core).
+        Dây cắm xuống máy gọi là downlink hay cổng access. Trong lab: <strong>sw-access → sw-core</strong>, 2 dây cổng 47–48 gộp LACP thành
+        1 cổng logic <code>lag-sw-access</code>; thường là các cổng cuối, tốc độ cao của switch.</p>
+      <p><strong>Uplink gần như luôn là trunk</strong> (chở VLAN của mọi máy phía dưới), nhưng <strong>trunk không nhất thiết là uplink</strong>:
+        dây sw-core → firewall core cũng là trunk, chỉ là nối tới firewall chứ không lên switch tầng trên.</p>
+      <p class="note"><strong>VLAN pruning</strong>: trunk chỉ cho qua VLAN cần thiết. Uplink trong lab chỉ cho VLAN 20 vì phía sw-access
+        chỉ có máy VLAN 20 — VLAN 40 (MGMT) bị cắt ở sw-core, ai cắm nhầm vào sw-access cũng không vào được mạng quản trị.</p>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>Xem trên lab</h2>
+    <pre>sudo ovs-vsctl get port lag-sw-access trunks   # [20]       uplink: chỉ VLAN 20
+sudo ovs-vsctl get port vnet23 trunks           # [20, 40]   trunk lên firewall core
+sudo ovs-vsctl get port vnet29 tag              # 40         cổng access của siem-01
+sudo ovs-appctl bond/show lag-sw-access         # 2 dây của uplink, trạng thái LACP
+sudo tcpdump -eni core-access1 vlan             # khung trên uplink đều có tag 20</pre>
+    <p class="note">Tên cổng <code>vnetN</code> đổi khi VM bật lại; tìm bằng <code>make libvirt-status</code>.</p>
+  </section>
+<!-- /trunk-uplink -->
+
+
+  <h2 id="cur" style="font-size:1.25rem;margin:8px 0 0">Bản trước: 1 switch lab-sw (đã thay bằng 3 switch)</h2>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 210" role="img" aria-label="Mặt trước switch lab-sw: cổng 1 trunk VLAN 10 tới firewall biên, cổng 2 trunk VLAN 10, 20, 40 tới firewall core, cổng 3 đến 5 access VLAN 20 cho master, worker, infra, cổng 6 access VLAN 10 cho edge-01, cổng 7 và 8 access VLAN 40 cho siem và jump.">
+      <rect x="20" y="20" width="960" height="180" rx="6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <text class="tb" x="40" y="56">lab-sw</text>
+      <text class="tm" x="40" y="76">Open vSwitch</text>
+      <text class="tm" x="40" y="93">8 cổng</text>
+      <text class="tm" x="40" y="132">giao diện</text>
+      <text class="tm" x="40" y="168">máy</text>
+      <text class="tb" x="185" y="56" text-anchor="middle">1</text>
+      <rect class="f10" x="150.0" y="64" width="70.0" height="48" stroke-width="0"/>
+      <rect x="150" y="64" width="70" height="48" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
+      <text class="lab" x="185" y="93" text-anchor="middle" fill="currentColor">T</text>
+      <text class="tm" x="185" y="132" text-anchor="middle">vnet12</text>
+      <text class="t" x="185" y="168" text-anchor="middle">firewall-</text>
+      <text class="t" x="185" y="184" text-anchor="middle">edge-01</text>
+      <text class="tb" x="287" y="56" text-anchor="middle">2</text>
+      <rect class="f10" x="252.0" y="64" width="23.3" height="48" stroke-width="0"/>
+      <rect class="f20" x="275.3" y="64" width="23.3" height="48" stroke-width="0"/>
+      <rect class="f40" x="298.7" y="64" width="23.3" height="48" stroke-width="0"/>
+      <rect x="252" y="64" width="70" height="48" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
+      <text class="lab" x="287" y="93" text-anchor="middle" fill="currentColor">T</text>
+      <text class="tm" x="287" y="132" text-anchor="middle">vnet14</text>
+      <text class="t" x="287" y="168" text-anchor="middle">firewall-</text>
+      <text class="t" x="287" y="184" text-anchor="middle">core-01</text>
+      <text class="tb" x="389" y="56" text-anchor="middle">3</text>
+      <rect class="f20" x="354" y="64" width="70" height="48" rx="3" stroke-width="2"/>
+      <text class="lab c20" x="389" y="93" text-anchor="middle">20</text>
+      <text class="tm" x="389" y="132" text-anchor="middle">vnet15</text>
+      <text class="t" x="389" y="168" text-anchor="middle">k8s-</text>
+      <text class="t" x="389" y="184" text-anchor="middle">master-01</text>
+      <text class="tb" x="491" y="56" text-anchor="middle">4</text>
+      <rect class="f20" x="456" y="64" width="70" height="48" rx="3" stroke-width="2"/>
+      <text class="lab c20" x="491" y="93" text-anchor="middle">20</text>
+      <text class="tm" x="491" y="132" text-anchor="middle">vnet16</text>
+      <text class="t" x="491" y="168" text-anchor="middle">k8s-</text>
+      <text class="t" x="491" y="184" text-anchor="middle">worker-01</text>
+      <text class="tb" x="593" y="56" text-anchor="middle">5</text>
+      <rect class="f20" x="558" y="64" width="70" height="48" rx="3" stroke-width="2"/>
+      <text class="lab c20" x="593" y="93" text-anchor="middle">20</text>
+      <text class="tm" x="593" y="132" text-anchor="middle">vnet17</text>
+      <text class="t" x="593" y="168" text-anchor="middle">infra-01</text>
+      <text class="tb" x="695" y="56" text-anchor="middle">6</text>
+      <rect class="f10" x="660" y="64" width="70" height="48" rx="3" stroke-width="2"/>
+      <text class="lab c10" x="695" y="93" text-anchor="middle">10</text>
+      <text class="tm" x="695" y="132" text-anchor="middle">vnet18</text>
+      <text class="t" x="695" y="168" text-anchor="middle">edge-01</text>
+      <text class="tb" x="797" y="56" text-anchor="middle">7</text>
+      <rect class="f40" x="762" y="64" width="70" height="48" rx="3" stroke-width="2"/>
+      <text class="lab c40" x="797" y="93" text-anchor="middle">40</text>
+      <text class="tm" x="797" y="132" text-anchor="middle">vnet19</text>
+      <text class="t" x="797" y="168" text-anchor="middle">siem-01</text>
+      <text class="tb" x="899" y="56" text-anchor="middle">8</text>
+      <rect class="f40" x="864" y="64" width="70" height="48" rx="3" stroke-width="2"/>
+      <text class="lab c40" x="899" y="93" text-anchor="middle">40</text>
+      <text class="tm" x="899" y="132" text-anchor="middle">vnet20</text>
+      <text class="t" x="899" y="168" text-anchor="middle">jump-01</text>
+    </svg>
+    </div>
+    <figcaption>Mặt trước switch, đúng số cổng OpenFlow (<code>ovs-ofctl show lab-sw</code>) lúc dựng xong. Ô một màu = cổng access của
+      VLAN đó; ô nhiều màu chữ T = cổng trunk mang các VLAN đó. Số cổng và tên <code>vnetN</code> do libvirt cấp theo thứ tự VM bật,
+      nên có thể đổi sau khi khởi động lại; VLAN của từng cổng thì cố định (theo MAC và portgroup).</figcaption>
+  </figure>
+
+  <section class="card">
+    <h2>Bảng cổng</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Cổng</th><th>Giao diện</th><th>Máy</th><th>Chế độ</th><th>VLAN</th><th>MAC của VM</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1</td><td class="mono">vnet12</td><td>firewall-edge-01</td><td>trunk</td><td><span class="chip k10">10</span></td><td class="mono">52:54:0a:0a:0a:fd</td></tr>
+          <tr><td class="mono">2</td><td class="mono">vnet14</td><td>firewall-core-01</td><td>trunk</td><td><span class="chip k10">10</span> <span class="chip k20">20</span> <span class="chip k40">40</span></td><td class="mono">52:54:0a:14:00:fd</td></tr>
+          <tr><td class="mono">3</td><td class="mono">vnet15</td><td>k8s-master-01</td><td>access</td><td><span class="chip k20">20</span></td><td class="mono">52:54:0a:14:00:0b</td></tr>
+          <tr><td class="mono">4</td><td class="mono">vnet16</td><td>k8s-worker-01</td><td>access</td><td><span class="chip k20">20</span></td><td class="mono">52:54:0a:14:00:15</td></tr>
+          <tr><td class="mono">5</td><td class="mono">vnet17</td><td>infra-01</td><td>access</td><td><span class="chip k20">20</span></td><td class="mono">52:54:0a:14:00:1e</td></tr>
+          <tr><td class="mono">6</td><td class="mono">vnet18</td><td>edge-01</td><td>access</td><td><span class="chip k10">10</span></td><td class="mono">52:54:0a:0a:0a:0a</td></tr>
+          <tr><td class="mono">7</td><td class="mono">vnet19</td><td>siem-01</td><td>access</td><td><span class="chip k40">40</span></td><td class="mono">52:54:0a:28:00:0a</td></tr>
+          <tr><td class="mono">8</td><td class="mono">vnet20</td><td>jump-01</td><td>access</td><td><span class="chip k40">40</span></td><td class="mono">52:54:0a:28:00:14</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Ngoài switch: <code>vnet13</code> = card WAN của firewall-edge-01 trên <code>lab-wan</code> (10.99.0.2). MAC theo IP: 52:54:<b>0a:14:00:0b</b> = 10.20.0.11.</p>
+  </section>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 930" role="img" aria-label="Topology chi tiết: máy nhà nối Internet qua NAT và nối WAN firewall biên qua lab-wan, VPN WireGuard tới VIP .3. Hai firewall cắm trunk vào switch Open vSwitch lab-sw; sáu VM cắm cổng access VLAN 10, 20, 40, kèm IP, cỡ máy, dịch vụ, cổng và gateway của từng máy.">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+      <rect class="box" x="20" y="40" width="96" height="48" rx="24"/>
+      <text class="tb" x="68" y="69" text-anchor="middle">Internet</text>
+      <line x1="116" y1="64" x2="166" y2="64" stroke="currentColor" stroke-width="1.4" marker-start="url(#ah)" marker-end="url(#ah)"/>
+      <text class="tm" x="141" y="56" text-anchor="middle">NAT</text>
+      <rect class="fw-bg" x="170" y="20" width="250" height="196" rx="4" stroke-width="1.4"/>
+      <text class="tb" x="184" y="44">máy nhà (KVM host)</text>
+      <text class="tc" x="184" y="66">lab-wan  10.99.0.1/24</text>
+      <text class="tc" x="184" y="83">  bridge NAT của libvirt</text>
+      <text class="tc" x="184" y="107">WireGuard “lab”  10.50.0.2</text>
+      <text class="tc" x="184" y="124">  → 10.99.0.3:51820</text>
+      <text class="tc" x="184" y="141">  route 10.10/10.20/10.40 vào VPN</text>
+      <text class="tc" x="184" y="165">lab-sw: chỉ là switch,</text>
+      <text class="tc" x="184" y="182">  máy nhà không có IP trong VLAN</text>
+      <line class="lw" x1="420" y1="70" x2="470" y2="70" stroke-width="2.4"/>
+      <text class="lab cw" x="445" y="62" text-anchor="middle">WAN</text>
+      <text class="tc" x="445" y="88" text-anchor="middle">vnet13</text>
+      <line class="lw" x1="420" y1="150" x2="466" y2="150" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ah)" style="color:var(--wan)"/>
+      <text class="lab cw" x="445" y="142" text-anchor="middle">VPN</text>
+      <rect class="fw" x="470" y="20" width="250" height="250" rx="4"/>
+      <text class="tb" x="595" y="44" text-anchor="middle">firewall-edge-01</text>
+      <text class="tc" x="484" y="64">2 vCPU · 1.5 GB · OPNsense</text>
+      <text class="tc" x="484" y="88">vtnet1  WAN 10.99.0.2/24</text>
+      <text class="tc" x="484" y="105">        VIP 10.99.0.3 (VPN)</text>
+      <text class="tc" x="484" y="122">vtnet0  trunk</text>
+      <text class="lab c10" x="484" y="139">└ vtnet0_vlan10 .253 (DMZ)</text>
+      <text class="tc" x="484" y="156">wg      10.50.0.1/24</text>
+      <text class="tc" x="484" y="180">mặc định → 10.99.0.1</text>
+      <text class="tc" x="484" y="197">10.20, 10.40 /24 → .252 (core)</text>
+      <text class="tc" x="484" y="221">NAT nguồn DMZ/LAN/MGMT → .2</text>
+      <text class="tc" x="484" y="238">port fwd :80 :443 → edge-01</text>
+      <text class="tc" x="484" y="255">DNS, NTP cho DMZ</text>
+      <rect class="fw" x="740" y="20" width="240" height="250" rx="4"/>
+      <text class="tb" x="860" y="44" text-anchor="middle">firewall-core-01</text>
+      <text class="tc" x="754" y="64">2 vCPU · 1.5 GB · OPNsense</text>
+      <text class="tc" x="754" y="88">vtnet0  trunk (card duy nhất)</text>
+      <text class="lab c10" x="754" y="105">├ vtnet0_vlan10 .252 wan</text>
+      <text class="lab c20" x="754" y="122">├ vtnet0_vlan20 .253 lan</text>
+      <text class="lab c40" x="754" y="139">└ vtnet0_vlan40 .253 opt1</text>
+      <text class="tc" x="754" y="163">mặc định → 10.10.10.253</text>
+      <text class="tc" x="754" y="180">không NAT · reply-to tắt</text>
+      <text class="tc" x="754" y="204">lọc mọi lần đổi VLAN</text>
+      <text class="tc" x="754" y="221">Unbound: DNS nội bộ</text>
+      <text class="tc" x="754" y="238">NTP cho LAN, MGMT</text>
+      <line class="trk l10" x1="595" y1="270" x2="595" y2="330"/>
+      <text class="tc" x="605" y="296">cổng 1 · vnet12</text>
+      <text class="lab c10" x="605" y="312">trunk: 10</text>
+      <line class="trk l10" x1="848" y1="270" x2="848" y2="330"/>
+      <line class="trk l20" x1="860" y1="270" x2="860" y2="330"/>
+      <line class="trk l40" x1="872" y1="270" x2="872" y2="330"/>
+      <text class="tc" x="836" y="296" text-anchor="end">cổng 2 · vnet14</text>
+      <text class="lab" x="836" y="312" text-anchor="end" fill="currentColor">trunk: 10, 20, 40</text>
+      <rect class="sw" x="20" y="330" width="960" height="64" rx="4"/>
+      <text class="swt" x="36" y="356">Open vSwitch lab-sw — mọi máy cắm vào đây (không IP, không lọc)</text>
+      <text class="swm" x="36" y="378">cùng VLAN: chuyển thẳng theo bảng MAC · khác VLAN: lên firewall qua trunk rồi quay lại với tag mới</text>
+      <line class="acc l10" x1="95" y1="394" x2="95" y2="452"/>
+      <text class="tc" x="101" y="414">cổng 6</text>
+      <text class="lab c10" x="101" y="430">access 10</text>
+      <rect class="box" x="20" y="452" width="150" height="206" rx="4" style="stroke:var(--v10)"/>
+      <text class="tb" x="30" y="474" style="font-size:13px">edge-01</text>
+      <text class="tc" x="30" y="494">10.10.10.10 · ens4</text>
+      <text class="tc" x="30" y="511">1 vCPU · 1.5 GB</text>
+      <line x1="30" y1="520" x2="160" y2="520" stroke="var(--line)"/>
+      <text class="t s12" x="30" y="536">HAProxy :80 :443</text>
+      <text class="t s12" x="30" y="553">WAF ModSecurity</text>
+      <text class="t s12" x="30" y="570">Wazuh agent</text>
+      <line x1="30" y1="579" x2="160" y2="579" stroke="var(--line)"/>
+      <text class="tc" x="30" y="595">gw .253 (biên)</text>
+      <text class="tc" x="30" y="612">10.20, 10.40 → .252</text>
+      <line class="acc l20" x1="257" y1="394" x2="257" y2="452"/>
+      <text class="tc" x="263" y="414">cổng 3</text>
+      <text class="lab c20" x="263" y="430">access 20</text>
+      <rect class="box" x="182" y="452" width="150" height="206" rx="4" style="stroke:var(--v20)"/>
+      <text class="tb" x="192" y="474" style="font-size:13px">k8s-master-01</text>
+      <text class="tc" x="192" y="494">10.20.0.11 · ens4</text>
+      <text class="tc" x="192" y="511">2 vCPU · 3 GB</text>
+      <line x1="192" y1="520" x2="322" y2="520" stroke="var(--line)"/>
+      <text class="t s12" x="192" y="536">kube-apiserver :6443</text>
+      <text class="t s12" x="192" y="553">etcd · kube-vip</text>
+      <text class="t s12" x="192" y="570">VIP API .10</text>
+      <line x1="192" y1="579" x2="322" y2="579" stroke="var(--line)"/>
+      <text class="tc" x="192" y="595">gw .253 (core)</text>
+      <line class="acc l20" x1="419" y1="394" x2="419" y2="452"/>
+      <text class="tc" x="425" y="414">cổng 4</text>
+      <text class="lab c20" x="425" y="430">access 20</text>
+      <rect class="box" x="344" y="452" width="150" height="206" rx="4" style="stroke:var(--v20)"/>
+      <text class="tb" x="354" y="474" style="font-size:13px">k8s-worker-01</text>
+      <text class="tc" x="354" y="494">10.20.0.21 · ens4</text>
+      <text class="tc" x="354" y="511">4 vCPU · 5 GB</text>
+      <line x1="354" y1="520" x2="484" y2="520" stroke="var(--line)"/>
+      <text class="t s12" x="354" y="536">Cilium · pod app</text>
+      <text class="t s12" x="354" y="553">Gateway public .200</text>
+      <text class="t s12" x="354" y="570">Gateway int. .210</text>
+      <line x1="354" y1="579" x2="484" y2="579" stroke="var(--line)"/>
+      <text class="tc" x="354" y="595">gw .253 (core)</text>
+      <line class="acc l20" x1="581" y1="394" x2="581" y2="452"/>
+      <text class="tc" x="587" y="414">cổng 5</text>
+      <text class="lab c20" x="587" y="430">access 20</text>
+      <rect class="box" x="506" y="452" width="150" height="206" rx="4" style="stroke:var(--v20)"/>
+      <text class="tb" x="516" y="474" style="font-size:13px">infra-01</text>
+      <text class="tc" x="516" y="494">10.20.0.30 · ens4</text>
+      <text class="tc" x="516" y="511">2 vCPU · 4 GB</text>
+      <line x1="516" y1="520" x2="646" y2="520" stroke="var(--line)"/>
+      <text class="t s12" x="516" y="536">Harbor :443</text>
+      <text class="t s12" x="516" y="553">Squid :3128</text>
+      <text class="t s12" x="516" y="570">Garage S3 :3900</text>
+      <text class="t s12" x="516" y="587">Loki bản sao :3100</text>
+      <line x1="516" y1="596" x2="646" y2="596" stroke="var(--line)"/>
+      <text class="tc" x="516" y="612">gw .253 (core)</text>
+      <line class="acc l40" x1="743" y1="394" x2="743" y2="452"/>
+      <text class="tc" x="749" y="414">cổng 8</text>
+      <text class="lab c40" x="749" y="430">access 40</text>
+      <rect class="box" x="668" y="452" width="150" height="206" rx="4" style="stroke:var(--v40)"/>
+      <text class="tb" x="678" y="474" style="font-size:13px">jump-01</text>
+      <text class="tc" x="678" y="494">10.40.0.20 · ens4</text>
+      <text class="tc" x="678" y="511">1 vCPU · 1 GB</text>
+      <line x1="678" y1="520" x2="808" y2="520" stroke="var(--line)"/>
+      <text class="t s12" x="678" y="536">SSH bastion :22</text>
+      <text class="t s12" x="678" y="553">ProxyJump → máy khác</text>
+      <line x1="678" y1="562" x2="808" y2="562" stroke="var(--line)"/>
+      <text class="tc" x="678" y="578">gw .253 (core)</text>
+      <line class="acc l40" x1="905" y1="394" x2="905" y2="452"/>
+      <text class="tc" x="911" y="414">cổng 7</text>
+      <text class="lab c40" x="911" y="430">access 40</text>
+      <rect class="box" x="830" y="452" width="150" height="206" rx="4" style="stroke:var(--v40)"/>
+      <text class="tb" x="840" y="474" style="font-size:13px">siem-01</text>
+      <text class="tc" x="840" y="494">10.40.0.10 · ens4</text>
+      <text class="tc" x="840" y="511">2 vCPU · 4 GB</text>
+      <line x1="840" y1="520" x2="970" y2="520" stroke="var(--line)"/>
+      <text class="t s12" x="840" y="536">Alloy :1514 syslog</text>
+      <text class="t s12" x="840" y="553">Loki · Grafana :3000</text>
+      <text class="t s12" x="840" y="570">Wazuh :1515 :1516</text>
+      <text class="t s12" x="840" y="587">Mailpit :8025</text>
+      <line x1="840" y1="596" x2="970" y2="596" stroke="var(--line)"/>
+      <text class="tc" x="840" y="612">gw .253 (core)</text>
+      <rect class="f10" x="20" y="676" width="150" height="74" rx="4" stroke-width="1.2"/>
+      <text class="lab c10" x="95.0" y="698" text-anchor="middle">VLAN 10 · dmz</text>
+      <text class="tc" x="95.0" y="717" text-anchor="middle">10.10.10.0/24</text>
+      <text class="tc" x="95.0" y="735" text-anchor="middle">gw .253 biên</text>
+      <rect class="f20" x="182" y="676" width="474" height="74" rx="4" stroke-width="1.2"/>
+      <text class="lab c20" x="419.0" y="698" text-anchor="middle">VLAN 20 · lan · K8s, Harbor, Squid</text>
+      <text class="tc" x="419.0" y="717" text-anchor="middle">10.20.0.0/24 · gw .253 (core) · VIP API .10</text>
+      <text class="tc" x="419.0" y="735" text-anchor="middle">MetalLB .200–.250 · Gateway public .200 · internal .210</text>
+      <rect class="f40" x="668" y="676" width="312" height="58" rx="4" stroke-width="1.2"/>
+      <text class="lab c40" x="824.0" y="698" text-anchor="middle">VLAN 40 · mgmt · quản trị, log</text>
+      <text class="tc" x="824.0" y="717" text-anchor="middle">10.40.0.0/24 · gw .253 (core)</text>
+      <rect x="182" y="766" width="474" height="58" rx="4" fill="none" stroke="var(--v20)" stroke-dasharray="5 4"/>
+      <text class="t" x="419" y="788" text-anchor="middle">Trong cluster (Cilium, không lên switch như VLAN riêng)</text>
+      <text class="tc" x="419" y="808" text-anchor="middle">pod 10.244.0.0/16 · service 10.96.0.0/12 · đóng gói giữa node</text>
+      <text class="tc" x="20" y="856">Quy tắc: lớp 2 (switch) chỉ trong 1 VLAN — mỗi lần đổi VLAN là 1 lần qua firewall (lớp 3), nên luật lọc được.</text>
+      <text class="tc" x="20" y="876">master ↔ worker, node → Harbor (cùng VLAN 20): chỉ qua switch · jump-01 → master (40 → 20): qua core</text>
+      <text class="tc" x="20" y="896">edge-01 → app (10 → 20): qua core · infra-01 → Internet (20 → 10 → WAN): qua core rồi biên (NAT)</text>
+      <text class="tc" x="20" y="916">Số cổng và vnetN là của lần dựng trước, có thể đổi sau khi bật lại; VLAN của từng máy thì cố định.</text>
+      </svg>
+    </div>
+    <figcaption>Switch ở giữa, mọi máy cắm vào nó. Hai firewall cũng chỉ là thiết bị cắm vào switch bằng cổng trunk; chỉ đường WAN của
+      biên đi ra ngoài switch. Mỗi VM ghi IP, cỡ máy, dịch vụ chính kèm cổng, và gateway; viền màu = VLAN của máy.</figcaption>
+  </figure>
+
+  <figure>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 250" role="img" aria-label="Đường đi một gói từ jump-01 ở VLAN 40 tới k8s-master-01 ở VLAN 20: vào switch qua cổng access 40, lên core qua trunk mang tag 40, core định tuyến và lọc luật, xuống switch qua trunk mang tag 20, ra cổng access 20 tới master.">
+      <defs>
+        <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <text class="tb" x="20" y="24">Ví dụ: jump-01 (VLAN 40) SSH tới k8s-master-01 (VLAN 20)</text>
+
+      <rect class="box" x="20" y="150" width="130" height="50" rx="4"/>
+      <text class="tb" x="85" y="172" text-anchor="middle">jump-01</text>
+      <text class="tm" x="85" y="190" text-anchor="middle">10.40.0.20</text>
+
+      <rect class="sw" x="250" y="150" width="500" height="50" rx="4"/>
+      <text class="swt" x="500" y="181" text-anchor="middle">lab-sw</text>
+
+      <rect class="fw" x="400" y="40" width="200" height="60" rx="4"/>
+      <text class="tb" x="500" y="64" text-anchor="middle">firewall-core-01</text>
+      <text class="tm" x="500" y="84" text-anchor="middle">định tuyến 40 → 20 + lọc luật</text>
+
+      <rect class="box" x="850" y="150" width="130" height="50" rx="4"/>
+      <text class="tb" x="915" y="172" text-anchor="middle">k8s-master-01</text>
+      <text class="tm" x="915" y="190" text-anchor="middle">10.20.0.11</text>
+
+      <line class="acc l40" x1="150" y1="175" x2="246" y2="175" marker-end="url(#ah2)"/>
+      <text class="lab c40" x="198" y="167" text-anchor="middle">① access 40</text>
+      <line class="acc l40" x1="440" y1="150" x2="440" y2="104" marker-end="url(#ah2)"/>
+      <text class="lab c40" x="432" y="132" text-anchor="end">② trunk, tag 40</text>
+      <line class="acc l20" x1="560" y1="100" x2="560" y2="146" marker-end="url(#ah2)"/>
+      <text class="lab c20" x="568" y="132">③ trunk, tag 20</text>
+      <line class="acc l20" x1="750" y1="175" x2="846" y2="175" marker-end="url(#ah2)"/>
+      <text class="lab c20" x="798" y="167" text-anchor="middle">④ access 20</text>
+      <text class="tm" x="500" y="232" text-anchor="middle">gói đi lên firewall rồi quay về đúng cái switch đó, chỉ đổi tag VLAN — "router-on-a-stick"</text>
+    </svg>
+    </div>
+    <figcaption>Đổi VLAN = đi lên firewall qua trunk rồi quay lại switch. Nhờ vậy luật firewall (vd. chỉ jump-01 được SSH vào LAN) áp được
+      cho mọi đường đi giữa các zone.</figcaption>
+  </figure>
+
+  <section style="display:grid;gap:20px">
+    <h2 id="paths" style="font-size:1.25rem;margin:0">Đường đi gói tin</h2>
+  <figure>
+    <h2>① Từ ngoài vào app (HTTPS)</h2>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 764" role="img" aria-label="Đường đi HTTPS từ máy nhà (đóng vai Internet) vào app: qua WAN firewall biên, DNAT tới edge-01 ở VLAN 10, edge-01 gửi tới core qua VLAN 10, core chuyển sang VLAN 20 tới worker.">
+    <defs>
+    <marker id="wa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    </defs>
+    <rect class="box" x="18.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="90.0" y="33" text-anchor="middle" style="font-size:13px">Client</text>
+    <text class="tm" x="90.0" y="50" text-anchor="middle">máy nhà 10.99.0.1</text>
+    <line x1="90.0" y1="58" x2="90.0" y2="754" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="182.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="254.0" y="33" text-anchor="middle" style="font-size:13px">firewall-edge-01</text>
+    <text class="tm" x="254.0" y="50" text-anchor="middle">WAN .2 · vlan10 .253</text>
+    <line x1="254.0" y1="58" x2="254.0" y2="754" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="sw" x="346.0" y="14" width="144" height="44" rx="4"/>
+    <text class="swt" x="418.0" y="33" text-anchor="middle" style="font-size:13px">lab-sw</text>
+    <text class="swm" x="418.0" y="50" text-anchor="middle">switch</text>
+    <line x1="418.0" y1="58" x2="418.0" y2="754" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="510.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="582.0" y="33" text-anchor="middle" style="font-size:13px">edge-01</text>
+    <text class="tm" x="582.0" y="50" text-anchor="middle">10.10.10.10</text>
+    <line x1="582.0" y1="58" x2="582.0" y2="754" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="674.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="746.0" y="33" text-anchor="middle" style="font-size:13px">firewall-core-01</text>
+    <text class="tm" x="746.0" y="50" text-anchor="middle">vlan10 .252 · vlan20 .253</text>
+    <line x1="746.0" y1="58" x2="746.0" y2="754" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="838.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="910.0" y="33" text-anchor="middle" style="font-size:13px">k8s-worker-01</text>
+    <text class="tm" x="910.0" y="50" text-anchor="middle">Gateway .200</text>
+    <line x1="910.0" y1="58" x2="910.0" y2="754" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <line class="lw" x1="100.0" y1="100" x2="242.0" y2="100" stroke-width="2.2" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab cw" x="172.0" y="93" text-anchor="middle">HTTPS → 10.99.0.2:443 (lab-wan)</text>
+    <circle cx="34" cy="97" r="12" class="sw"/><text class="swt" x="34" y="102" text-anchor="middle" style="font-size:12px">1</text>
+    <rect x="246.0" y="132" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="270.0" y="148">luật WAN + port forward 443 → 10.10.10.10</text>
+    <circle cx="34" cy="143" r="12" class="sw"/><text class="swt" x="34" y="148" text-anchor="middle" style="font-size:12px">2</text>
+    <line class="l10" x1="264.0" y1="192" x2="406.0" y2="192" stroke-width="2.2" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab c10" x="336.0" y="185" text-anchor="middle">ra vtnet0_vlan10 · cổng 1 · tag 10</text>
+    <circle cx="34" cy="189" r="12" class="sw"/><text class="swt" x="34" y="194" text-anchor="middle" style="font-size:12px">3</text>
+    <line class="l10" x1="428.0" y1="238" x2="570.0" y2="238" stroke-width="2.2" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab c10" x="500.0" y="231" text-anchor="middle">cổng 6 · access 10</text>
+    <circle cx="34" cy="235" r="12" class="sw"/><text class="swt" x="34" y="240" text-anchor="middle" style="font-size:12px">4</text>
+    <rect x="574.0" y="270" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="598.0" y="286">HAProxy + WAF kiểm tra, chọn backend 10.20.0.200</text>
+    <circle cx="34" cy="281" r="12" class="sw"/><text class="swt" x="34" y="286" text-anchor="middle" style="font-size:12px">5</text>
+    <line class="l10" x1="572.0" y1="330" x2="430.0" y2="330" stroke-width="2.2" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab c10" x="500.0" y="323" text-anchor="middle">route 10.20.0.0/24 via .252 · cổng 6</text>
+    <circle cx="34" cy="327" r="12" class="sw"/><text class="swt" x="34" y="332" text-anchor="middle" style="font-size:12px">6</text>
+    <line class="l10" x1="428.0" y1="376" x2="734.0" y2="376" stroke-width="2.2" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab c10" x="582.0" y="369" text-anchor="middle">cổng 2 · tag 10</text>
+    <circle cx="34" cy="373" r="12" class="sw"/><text class="swt" x="34" y="378" text-anchor="middle" style="font-size:12px">7</text>
+    <rect x="738.0" y="408" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="730.0" y="424" text-anchor="end">luật: edge-01 → Gateway public :443 ✓</text>
+    <circle cx="34" cy="419" r="12" class="sw"/><text class="swt" x="34" y="424" text-anchor="middle" style="font-size:12px">8</text>
+    <line class="l20" x1="736.0" y1="468" x2="430.0" y2="468" stroke-width="2.2" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="582.0" y="461" text-anchor="middle">định tuyến sang VLAN 20 · cổng 2 · tag 20</text>
+    <circle cx="34" cy="465" r="12" class="sw"/><text class="swt" x="34" y="470" text-anchor="middle" style="font-size:12px">9</text>
+    <line class="l20" x1="428.0" y1="514" x2="898.0" y2="514" stroke-width="2.2" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="664.0" y="507" text-anchor="middle">cổng 4 · access 20 → MetalLB .200 → pod</text>
+    <circle cx="34" cy="511" r="12" class="sw"/><text class="swt" x="34" y="516" text-anchor="middle" style="font-size:12px">10</text>
+    <line class="l20" x1="900.0" y1="560" x2="758.0" y2="560" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="828.0" y="553" text-anchor="middle">trả lời → gateway .253 (qua switch, tag 20)</text>
+    <circle cx="34" cy="557" r="12" class="sw"/><text class="swt" x="34" y="562" text-anchor="middle" style="font-size:12px">11</text>
+    <line class="l10" x1="736.0" y1="606" x2="594.0" y2="606" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab c10" x="664.0" y="599" text-anchor="middle">trả thẳng cho edge-01 (tag 10, không reply-to)</text>
+    <circle cx="34" cy="603" r="12" class="sw"/><text class="swt" x="34" y="608" text-anchor="middle" style="font-size:12px">12</text>
+    <line class="l10" x1="572.0" y1="652" x2="266.0" y2="652" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab c10" x="418.0" y="645" text-anchor="middle">edge-01 trả lời client → biên .253 (tag 10)</text>
+    <circle cx="34" cy="649" r="12" class="sw"/><text class="swt" x="34" y="654" text-anchor="middle" style="font-size:12px">13</text>
+    <line class="lw" x1="244.0" y1="698" x2="102.0" y2="698" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#wa)" style="color:var(--fg)"/>
+    <text class="lab cw" x="172.0" y="691" text-anchor="middle">bỏ DNAT, trả 10.99.0.2 → client</text>
+    <circle cx="34" cy="695" r="12" class="sw"/><text class="swt" x="34" y="700" text-anchor="middle" style="font-size:12px">14</text>
+    </svg>
+    </div>
+    <figcaption>Ở máy nhà, "client ngoài Internet" chính là máy nhà trên lab-wan (10.99.0.1): NAT của libvirt không mở cổng nào từ Internet thật vào lab. Trên GCP, bước 1 đến từ Internet thật. Trong lab, gói vào đổi VLAN đúng một lần (10 → 20) và lần đó đi qua core. Mũi tên nét đứt là chiều về: đi đúng ngược đường vào, nhờ core tắt reply-to và edge-01 có route tĩnh tới LAN qua .252.</figcaption>
+  </figure>
+
+  <figure>
+    <h2>② Quản trị qua VPN (máy nhà → jump-01)</h2>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 488" role="img" aria-label="Đường đi VPN: WireGuard tới IP VPN của biên, biên chuyển sang core qua VLAN 10, core chuyển sang VLAN 40 tới jump-01.">
+    <defs>
+    <marker id="va" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    </defs>
+    <rect class="box" x="18.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="90.0" y="33" text-anchor="middle" style="font-size:13px">Máy admin</text>
+    <text class="tm" x="90.0" y="50" text-anchor="middle">10.50.0.2 (VPN)</text>
+    <line x1="90.0" y1="58" x2="90.0" y2="478" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="223.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="295.0" y="33" text-anchor="middle" style="font-size:13px">firewall-edge-01</text>
+    <text class="tm" x="295.0" y="50" text-anchor="middle">VIP .3 · WireGuard .50.1</text>
+    <line x1="295.0" y1="58" x2="295.0" y2="478" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="sw" x="428.0" y="14" width="144" height="44" rx="4"/>
+    <text class="swt" x="500.0" y="33" text-anchor="middle" style="font-size:13px">lab-sw</text>
+    <text class="swm" x="500.0" y="50" text-anchor="middle">switch</text>
+    <line x1="500.0" y1="58" x2="500.0" y2="478" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="633.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="705.0" y="33" text-anchor="middle" style="font-size:13px">firewall-core-01</text>
+    <text class="tm" x="705.0" y="50" text-anchor="middle">vlan10 .252 · vlan40 .253</text>
+    <line x1="705.0" y1="58" x2="705.0" y2="478" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="838.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="910.0" y="33" text-anchor="middle" style="font-size:13px">jump-01</text>
+    <text class="tm" x="910.0" y="50" text-anchor="middle">10.40.0.20</text>
+    <line x1="910.0" y1="58" x2="910.0" y2="478" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <line class="lw" x1="100.0" y1="100" x2="283.0" y2="100" stroke-width="2.2" marker-end="url(#va)" style="color:var(--fg)"/>
+    <text class="lab cw" x="192.5" y="93" text-anchor="middle">WireGuard UDP → 10.99.0.3:51820</text>
+    <circle cx="34" cy="97" r="12" class="sw"/><text class="swt" x="34" y="102" text-anchor="middle" style="font-size:12px">1</text>
+    <rect x="287.0" y="132" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="311.0" y="148">giải mã · luật: VPN admin → jump:22 ✓</text>
+    <circle cx="34" cy="143" r="12" class="sw"/><text class="swt" x="34" y="148" text-anchor="middle" style="font-size:12px">2</text>
+    <line class="l10" x1="305.0" y1="192" x2="488.0" y2="192" stroke-width="2.2" marker-end="url(#va)" style="color:var(--fg)"/>
+    <text class="lab c10" x="397.5" y="185" text-anchor="middle">route 10.40.0.0/24 via .252 · cổng 1 · tag 10</text>
+    <circle cx="34" cy="189" r="12" class="sw"/><text class="swt" x="34" y="194" text-anchor="middle" style="font-size:12px">3</text>
+    <line class="l10" x1="510.0" y1="238" x2="693.0" y2="238" stroke-width="2.2" marker-end="url(#va)" style="color:var(--fg)"/>
+    <text class="lab c10" x="602.5" y="231" text-anchor="middle">cổng 2 · tag 10</text>
+    <circle cx="34" cy="235" r="12" class="sw"/><text class="swt" x="34" y="240" text-anchor="middle" style="font-size:12px">4</text>
+    <rect x="697.0" y="270" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="721.0" y="286">luật: VPN admin (qua biên) → jump:22 ✓</text>
+    <circle cx="34" cy="281" r="12" class="sw"/><text class="swt" x="34" y="286" text-anchor="middle" style="font-size:12px">5</text>
+    <line class="l40" x1="695.0" y1="330" x2="512.0" y2="330" stroke-width="2.2" marker-end="url(#va)" style="color:var(--fg)"/>
+    <text class="lab c40" x="602.5" y="323" text-anchor="middle">sang VLAN 40 · cổng 2 · tag 40</text>
+    <circle cx="34" cy="327" r="12" class="sw"/><text class="swt" x="34" y="332" text-anchor="middle" style="font-size:12px">6</text>
+    <line class="l40" x1="510.0" y1="376" x2="898.0" y2="376" stroke-width="2.2" marker-end="url(#va)" style="color:var(--fg)"/>
+    <text class="lab c40" x="705.0" y="369" text-anchor="middle">cổng 8 · access 40 → SSH</text>
+    <circle cx="34" cy="373" r="12" class="sw"/><text class="swt" x="34" y="378" text-anchor="middle" style="font-size:12px">7</text>
+    <rect x="902.0" y="408" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="894.0" y="424" text-anchor="end">từ đây ProxyJump sang máy khác (lại qua core)</text>
+    <circle cx="34" cy="419" r="12" class="sw"/><text class="swt" x="34" y="424" text-anchor="middle" style="font-size:12px">8</text>
+    </svg>
+    </div>
+    <figcaption>Máy admin chỉ vào thẳng được jump-01 và GUI/API của 2 firewall. SSH tới các máy khác phải nhảy qua jump-01, nên lại qua core thêm một lần.</figcaption>
+  </figure>
+
+  <figure>
+    <h2>③ Từ trong ra Internet (infra-01 kéo image cho Harbor)</h2>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 442" role="img" aria-label="Đường đi ra Internet: infra-01 ở VLAN 20 tới core, core gửi qua VLAN 10 tới biên, biên NAT ra WAN.">
+    <defs>
+    <marker id="oa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+    </defs>
+    <rect class="box" x="18.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="90.0" y="33" text-anchor="middle" style="font-size:13px">infra-01</text>
+    <text class="tm" x="90.0" y="50" text-anchor="middle">10.20.0.30</text>
+    <line x1="90.0" y1="58" x2="90.0" y2="432" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="sw" x="223.0" y="14" width="144" height="44" rx="4"/>
+    <text class="swt" x="295.0" y="33" text-anchor="middle" style="font-size:13px">lab-sw</text>
+    <text class="swm" x="295.0" y="50" text-anchor="middle">switch</text>
+    <line x1="295.0" y1="58" x2="295.0" y2="432" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="428.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="500.0" y="33" text-anchor="middle" style="font-size:13px">firewall-core-01</text>
+    <text class="tm" x="500.0" y="50" text-anchor="middle">vlan20 .253 · vlan10 .252</text>
+    <line x1="500.0" y1="58" x2="500.0" y2="432" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="633.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="705.0" y="33" text-anchor="middle" style="font-size:13px">firewall-edge-01</text>
+    <text class="tm" x="705.0" y="50" text-anchor="middle">vlan10 .253 · WAN .2</text>
+    <line x1="705.0" y1="58" x2="705.0" y2="432" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="838.0" y="14" width="144" height="44" rx="4"/>
+    <text class="tb" x="910.0" y="33" text-anchor="middle" style="font-size:13px">Internet</text>
+    <text class="tm" x="910.0" y="50" text-anchor="middle">qua NAT libvirt</text>
+    <line x1="910.0" y1="58" x2="910.0" y2="432" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <line class="l20" x1="100.0" y1="100" x2="283.0" y2="100" stroke-width="2.2" marker-end="url(#oa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="192.5" y="93" text-anchor="middle">→ gateway .253 · cổng 5 · access 20</text>
+    <circle cx="34" cy="97" r="12" class="sw"/><text class="swt" x="34" y="102" text-anchor="middle" style="font-size:12px">1</text>
+    <line class="l20" x1="305.0" y1="146" x2="488.0" y2="146" stroke-width="2.2" marker-end="url(#oa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="397.5" y="139" text-anchor="middle">cổng 2 · tag 20</text>
+    <circle cx="34" cy="143" r="12" class="sw"/><text class="swt" x="34" y="148" text-anchor="middle" style="font-size:12px">2</text>
+    <rect x="492.0" y="178" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="516.0" y="194">luật: infra-01 → 80/443 ✓ · core không NAT</text>
+    <circle cx="34" cy="189" r="12" class="sw"/><text class="swt" x="34" y="194" text-anchor="middle" style="font-size:12px">3</text>
+    <line class="l10" x1="490.0" y1="238" x2="307.0" y2="238" stroke-width="2.2" marker-end="url(#oa)" style="color:var(--fg)"/>
+    <text class="lab c10" x="397.5" y="231" text-anchor="middle">gateway mặc định → biên .253 · cổng 2 · tag 10</text>
+    <circle cx="34" cy="235" r="12" class="sw"/><text class="swt" x="34" y="240" text-anchor="middle" style="font-size:12px">4</text>
+    <line class="l10" x1="305.0" y1="284" x2="693.0" y2="284" stroke-width="2.2" marker-end="url(#oa)" style="color:var(--fg)"/>
+    <text class="lab c10" x="500.0" y="277" text-anchor="middle">cổng 1 · tag 10</text>
+    <circle cx="34" cy="281" r="12" class="sw"/><text class="swt" x="34" y="286" text-anchor="middle" style="font-size:12px">5</text>
+    <rect x="697.0" y="316" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="689.0" y="332" text-anchor="end">luật biên ✓ · NAT nguồn 10.20.0.30 → 10.99.0.2</text>
+    <circle cx="34" cy="327" r="12" class="sw"/><text class="swt" x="34" y="332" text-anchor="middle" style="font-size:12px">6</text>
+    <line class="lw" x1="715.0" y1="376" x2="898.0" y2="376" stroke-width="2.2" marker-end="url(#oa)" style="color:var(--fg)"/>
+    <text class="lab cw" x="807.5" y="369" text-anchor="middle">ra WAN → lab-wan → NAT máy nhà → Internet</text>
+    <circle cx="34" cy="373" r="12" class="sw"/><text class="swt" x="34" y="378" text-anchor="middle" style="font-size:12px">7</text>
+    </svg>
+    </div>
+    <figcaption>Các node K8s không đi đường này: chúng ra Internet qua Squid trên infra-01, và chỉ infra-01 được ra thẳng (cổng 80/443). Biên thấy IP thật 10.20.0.30, vì core không NAT.</figcaption>
+  </figure>
+
+  <figure>
+    <h2>④ Trong cùng VLAN (worker kéo image từ Harbor)</h2>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 560" role="img" aria-label="k8s-worker-01 kéo image từ Harbor trên infra-01, cùng VLAN 20: ARP broadcast chỉ lan trong VLAN 20, sau đó gói TCP đi thẳng cổng 4 sang cổng 5 qua switch, không qua firewall core.">
+    <defs><marker id="sa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+    <rect class="box" x="20" y="14" width="180" height="44" rx="4"/>
+    <text class="tb" x="110" y="33" text-anchor="middle" style="font-size:13px">k8s-worker-01</text>
+    <text class="tm" x="110" y="50" text-anchor="middle">10.20.0.21</text>
+    <line x1="110" y1="58" x2="110" y2="550" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="sw" x="280" y="14" width="180" height="44" rx="4"/>
+    <text class="swt" x="370" y="33" text-anchor="middle" style="font-size:13px">lab-sw</text>
+    <text class="swm" x="370" y="50" text-anchor="middle">switch</text>
+    <line x1="370" y1="58" x2="370" y2="550" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="540" y="14" width="180" height="44" rx="4"/>
+    <text class="tb" x="630" y="33" text-anchor="middle" style="font-size:13px">infra-01</text>
+    <text class="tm" x="630" y="50" text-anchor="middle">Harbor 10.20.0.30</text>
+    <line x1="630" y1="58" x2="630" y2="550" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <rect class="box" x="800" y="14" width="180" height="44" rx="4"/>
+    <text class="tb" x="890" y="33" text-anchor="middle" style="font-size:13px">firewall-core-01</text>
+    <text class="tm" x="890" y="50" text-anchor="middle">vlan20 .253</text>
+    <line x1="890" y1="58" x2="890" y2="550" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 4"/>
+    <line class="l20" x1="120" y1="100" x2="358" y2="100" stroke-width="2.2" marker-end="url(#sa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="240.0" y="93" text-anchor="middle">ARP: ai là 10.20.0.30? (broadcast)</text>
+    <circle cx="34" cy="97" r="12" class="sw"/><text class="swt" x="34" y="102" text-anchor="middle" style="font-size:12px">1</text>
+    <line class="l20" x1="380" y1="146" x2="618" y2="146" stroke-width="2.2" marker-end="url(#sa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="500.0" y="139" text-anchor="middle">flood trong VLAN 20 (cổng 3, 5)</text>
+    <circle cx="34" cy="143" r="12" class="sw"/><text class="swt" x="34" y="148" text-anchor="middle" style="font-size:12px">2</text>
+    <line class="l20" x1="380" y1="192" x2="878" y2="192" stroke-width="2.2" marker-end="url(#sa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="760.0" y="185" text-anchor="middle">cả trunk, tag 20 · core bỏ qua</text>
+    <circle cx="34" cy="189" r="12" class="sw"/><text class="swt" x="34" y="194" text-anchor="middle" style="font-size:12px">3</text>
+    <rect x="362" y="224" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="354" y="240" text-anchor="end">edge-01, jump, siem không nhận (khác VLAN)</text>
+    <circle cx="34" cy="235" r="12" class="sw"/><text class="swt" x="34" y="240" text-anchor="middle" style="font-size:12px">4</text>
+    <line class="l20" x1="620" y1="284" x2="382" y2="284" stroke-width="2.2" marker-end="url(#sa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="500.0" y="277" text-anchor="middle">ARP trả lời: MAC 52:54:0a:14:00:1e</text>
+    <circle cx="34" cy="281" r="12" class="sw"/><text class="swt" x="34" y="286" text-anchor="middle" style="font-size:12px">5</text>
+    <line class="l20" x1="360" y1="330" x2="122" y2="330" stroke-width="2.2" marker-end="url(#sa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="240.0" y="323" text-anchor="middle">cổng 4 · switch học MAC</text>
+    <circle cx="34" cy="327" r="12" class="sw"/><text class="swt" x="34" y="332" text-anchor="middle" style="font-size:12px">6</text>
+    <line class="l20" x1="120" y1="376" x2="358" y2="376" stroke-width="2.2" marker-end="url(#sa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="240.0" y="369" text-anchor="middle">TCP :443 → harbor (10.20.0.30)</text>
+    <circle cx="34" cy="373" r="12" class="sw"/><text class="swt" x="34" y="378" text-anchor="middle" style="font-size:12px">7</text>
+    <line class="l20" x1="380" y1="422" x2="618" y2="422" stroke-width="2.2" marker-end="url(#sa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="500.0" y="415" text-anchor="middle">bảng MAC → chỉ ra cổng 5</text>
+    <circle cx="34" cy="419" r="12" class="sw"/><text class="swt" x="34" y="424" text-anchor="middle" style="font-size:12px">8</text>
+    <line class="l20" x1="620" y1="468" x2="122" y2="468" stroke-width="2.2" stroke-dasharray="6 4" marker-end="url(#sa)" style="color:var(--fg)"/>
+    <text class="lab c20" x="240.0" y="461" text-anchor="middle">trả lời: cổng 5 → cổng 4, không lên trunk</text>
+    <circle cx="34" cy="465" r="12" class="sw"/><text class="swt" x="34" y="470" text-anchor="middle" style="font-size:12px">9</text>
+    <rect x="882" y="500" width="16" height="24" rx="2" class="box" style="stroke:currentColor"/>
+    <text class="t" x="874" y="516" text-anchor="end">luật firewall không thấy gói TCP này</text>
+    <circle cx="34" cy="511" r="12" class="sw"/><text class="swt" x="34" y="516" text-anchor="middle" style="font-size:12px">10</text>
+    </svg>
+    </div>
+    <figcaption>Cùng VLAN thì chỉ switch làm việc: ARP broadcast lan tới mọi cổng của VLAN 20 (kể cả trunk của core, mang tag 20) nhưng
+      không sang VLAN 10/40; gói dữ liệu thì switch tra bảng MAC rồi đẩy thẳng cổng 4 → cổng 5. Firewall không lọc được đường này:
+      master ↔ worker, node → Harbor/Squid (:443, :3128) đều đi kiểu này. Bảo vệ trong VLAN 20 là việc của NetworkPolicy (pod) và
+      iptables trên từng máy (vd. Loki bản sao chỉ nhận từ siem-01).</figcaption>
+  </figure>
+
+  <figure>
+    <h2>⑤ Luồng log về SIEM (chạy liên tục)</h2>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 440" role="img" aria-label="Mọi máy gửi log về siem-01 ở VLAN 40: máy VLAN 10 và 20 đi qua firewall core, jump-01 cùng VLAN 40 chỉ qua switch. siem-01 đẩy bản sao log sang Loki trên infra-01 ở VLAN 20, lại qua core.">
+      <defs><marker id="la" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+
+      <!-- nguồn log, nhóm theo VLAN -->
+      <rect class="f40" x="20" y="36" width="240" height="72" rx="4" stroke-width="1.2"/>
+      <text class="lab c40" x="34" y="56">VLAN 40 · mgmt</text>
+      <text class="t" x="34" y="77">jump-01 .20</text>
+      <text class="tm" x="34" y="96">rsyslog · Wazuh agent</text>
+
+      <rect class="f10" x="20" y="128" width="240" height="118" rx="4" stroke-width="1.2"/>
+      <text class="lab c10" x="34" y="148">VLAN 10 · dmz</text>
+      <text class="t" x="34" y="169">edge-01 .10</text>
+      <text class="tm" x="34" y="187">rsyslog · Wazuh · HAProxy/WAF</text>
+      <text class="t" x="34" y="213">firewall-edge-01 .253</text>
+      <text class="tm" x="34" y="231">syslog OPNsense</text>
+
+      <rect class="f20" x="20" y="266" width="240" height="124" rx="4" stroke-width="1.2"/>
+      <text class="lab c20" x="34" y="286">VLAN 20 · lan</text>
+      <text class="t" x="34" y="307">k8s-master-01 .11</text>
+      <text class="t" x="34" y="327">k8s-worker-01 .21</text>
+      <text class="t" x="34" y="347">infra-01 .30</text>
+      <text class="tm" x="34" y="371">mỗi máy: rsyslog · Wazuh agent</text>
+
+      <!-- core lọc ở giữa -->
+      <rect class="fw" x="400" y="150" width="226" height="190" rx="4"/>
+      <text class="tb" x="513" y="174" text-anchor="middle">firewall-core-01</text>
+      <text class="tm" x="414" y="200">→ 10.40.0.10 được mở:</text>
+      <text class="lab c10" x="414" y="220">từ DMZ: luật 25, 26, 27</text>
+      <text class="lab c20" x="414" y="240">từ LAN: luật 160, 165</text>
+      <text class="tm" x="414" y="262">tự gửi syslog từ .253 vlan40</text>
+      <text class="lab c40" x="414" y="290">→ infra :3100: luật 220</text>
+      <text class="tm" x="414" y="318">còn lại: chặn + ghi log</text>
+
+      <!-- đích -->
+      <rect class="box" x="760" y="140" width="220" height="130" rx="4" style="stroke:var(--v40)"/>
+      <text class="tb" x="774" y="164">siem-01 · 10.40.0.10</text>
+      <text class="tm" x="774" y="188">:1514 TCP syslog → Alloy</text>
+      <text class="tm" x="774" y="207">Alloy → Loki tại chỗ</text>
+      <text class="tm" x="774" y="226">      + đẩy bản sao</text>
+      <text class="tm" x="774" y="252">:1515/:1516 Wazuh manager</text>
+
+      <rect class="box" x="760" y="330" width="220" height="90" rx="4" style="stroke:var(--v20)"/>
+      <text class="tb" x="774" y="354">infra-01 · 10.20.0.30</text>
+      <text class="tm" x="774" y="377">Loki bản sao :3100</text>
+      <text class="tm" x="774" y="398">iptables: chỉ nhận .40.0.10</text>
+
+      <!-- mũi tên -->
+      <polyline class="acc l40" points="260,72 870,72 870,134" marker-end="url(#la)" style="color:var(--fg)"/>
+      <text class="lab c40" x="565" y="64" text-anchor="middle">cùng VLAN 40: chỉ qua switch, không qua core</text>
+      <line class="acc l10" x1="260" y1="190" x2="394" y2="210" marker-end="url(#la)" style="color:var(--fg)"/>
+      <text class="lab c10" x="327" y="188" text-anchor="middle">tag 10</text>
+      <line class="acc l20" x1="260" y1="328" x2="394" y2="300" marker-end="url(#la)" style="color:var(--fg)"/>
+      <text class="lab c20" x="327" y="300" text-anchor="middle">tag 20</text>
+      <line class="acc l40" x1="626" y1="200" x2="754" y2="200" marker-end="url(#la)" style="color:var(--fg)"/>
+      <text class="lab c40" x="690" y="192" text-anchor="middle">tag 40</text>
+      <line class="acc l40" x1="760" y1="258" x2="632" y2="280" marker-end="url(#la)" style="color:var(--fg)"/>
+      <text class="lab c40" x="700" y="250" text-anchor="middle">bản sao</text>
+      <line class="acc l20" x1="626" y1="316" x2="754" y2="362" marker-end="url(#la)" style="color:var(--fg)"/>
+      <text class="lab c20" x="660" y="356" text-anchor="middle">tag 20</text>
+    </svg>
+    </div>
+    <figcaption>Mọi máy Linux chuyển log qua rsyslog (TCP 1514, RFC 5424) và Wazuh agent (1515 đăng ký, 1516 sự kiện); hai firewall gửi
+      syslog OPNsense. Máy VLAN 10 và 20 phải qua core, nên core có luật mở riêng tới đúng siem-01. Firewall biên đi tới 10.40 bằng route
+      tĩnh qua core .252. siem-01 (Alloy) ghi log vào Loki của nó và đẩy thêm một bản sao sang infra-01:3100 (VLAN 40 → 20, lại qua core):
+      chiếm được siem-01 rồi xoá log thì bản sao vẫn còn.</figcaption>
+  </figure>
+
+  <figure>
+    <h2 id="tag8021q">⑥ Thẻ 802.1Q trên dây</h2>
+    <div class="scroll">
+    <svg viewBox="0 0 1000 330" role="img" aria-label="Khung Ethernet trên cổng access không có thẻ VLAN. Trên cổng trunk, switch chèn 4 byte thẻ 802.1Q gồm TPID 0x8100 và VID 20 vào giữa MAC nguồn và EtherType.">
+      <text class="tb" x="20" y="40">Cổng access (VM ↔ switch): khung thường, VM không biết VLAN</text>
+      <rect class="box" style="stroke:currentColor" x="20" y="52" width="130" height="46" stroke-width="1.4"/>
+      <text class="t" x="85.0" y="72" text-anchor="middle">MAC đích</text>
+      <text class="tm" x="85.0" y="89" text-anchor="middle">6 byte</text>
+      <rect class="box" style="stroke:currentColor" x="150" y="52" width="130" height="46" stroke-width="1.4"/>
+      <text class="t" x="215.0" y="72" text-anchor="middle">MAC nguồn</text>
+      <text class="tm" x="215.0" y="89" text-anchor="middle">6 byte</text>
+      <rect class="box" style="stroke:currentColor" x="280" y="52" width="110" height="46" stroke-width="1.4"/>
+      <text class="t" x="335.0" y="72" text-anchor="middle">EtherType</text>
+      <text class="tm" x="335.0" y="89" text-anchor="middle">0x0800 (IPv4)</text>
+      <rect class="box" style="stroke:currentColor" x="390" y="52" width="400" height="46" stroke-width="1.4"/>
+      <text class="t" x="590.0" y="72" text-anchor="middle">gói IP</text>
+      <text class="tm" x="590.0" y="89" text-anchor="middle">≤ 1460 byte (lab_mtu)</text>
+      <rect class="box" style="stroke:currentColor" x="790" y="52" width="80" height="46" stroke-width="1.4"/>
+      <text class="t" x="830.0" y="72" text-anchor="middle">FCS</text>
+      <text class="tm" x="830.0" y="89" text-anchor="middle">4 byte</text>
+      <line x1="280" y1="98" x2="280" y2="168" stroke="var(--v20)" stroke-width="1.4" stroke-dasharray="4 4"/>
+      <line x1="280" y1="98" x2="540" y2="168" stroke="var(--v20)" stroke-width="1.4" stroke-dasharray="4 4"/>
+      <text class="lab c20" x="420" y="128">switch chèn 4 byte</text>
+      <text class="tb" x="20" y="156">Cổng trunk (switch ↔ firewall): thêm thẻ VLAN</text>
+      <rect class="box" style="stroke:currentColor" x="20" y="168" width="130" height="46" stroke-width="1.4"/>
+      <text class="t" x="85.0" y="188" text-anchor="middle">MAC đích</text>
+      <text class="tm" x="85.0" y="205" text-anchor="middle">6 byte</text>
+      <rect class="box" style="stroke:currentColor" x="150" y="168" width="130" height="46" stroke-width="1.4"/>
+      <text class="t" x="215.0" y="188" text-anchor="middle">MAC nguồn</text>
+      <text class="tm" x="215.0" y="205" text-anchor="middle">6 byte</text>
+      <rect class="f20" x="280" y="168" width="90" height="46" stroke-width="1.4"/>
+      <text class="t" x="325.0" y="188" text-anchor="middle">TPID</text>
+      <text class="tm" x="325.0" y="205" text-anchor="middle">0x8100</text>
+      <rect class="f20" x="370" y="168" width="170" height="46" stroke-width="1.4"/>
+      <text class="t" x="455.0" y="188" text-anchor="middle">TCI</text>
+      <text class="tm" x="455.0" y="205" text-anchor="middle">PCP 0 · DEI 0 · VID 20</text>
+      <rect class="box" style="stroke:currentColor" x="540" y="168" width="110" height="46" stroke-width="1.4"/>
+      <text class="t" x="595.0" y="188" text-anchor="middle">EtherType</text>
+      <text class="tm" x="595.0" y="205" text-anchor="middle">0x0800 (IPv4)</text>
+      <rect class="box" style="stroke:currentColor" x="650" y="168" width="250" height="46" stroke-width="1.4"/>
+      <text class="t" x="775.0" y="188" text-anchor="middle">gói IP</text>
+      <text class="tm" x="775.0" y="205" text-anchor="middle">không đổi</text>
+      <rect class="box" style="stroke:currentColor" x="900" y="168" width="80" height="46" stroke-width="1.4"/>
+      <text class="t" x="940.0" y="188" text-anchor="middle">FCS</text>
+      <text class="tm" x="940.0" y="205" text-anchor="middle">tính lại</text>
+      <text class="tm" x="20" y="250">vào cổng access 20 → switch gán VLAN 20 · ra trunk → gắn thẻ VID 20 · ra cổng access 20 → gỡ thẻ</text>
+      <text class="tm" x="20" y="272">trunk chỉ nhận VLAN được khai (biên: 10 · core: 10, 20, 40); khung không thẻ hoặc VID lạ trên trunk → bỏ</text>
+      <text class="tm" x="20" y="294">OPNsense: vtnet0 nhận khung VID 20 → giao cho vtnet0_vlan20 (lan) · gửi từ vtnet0_vlan40 → gắn VID 40</text>
+      <text class="tm" x="20" y="316">thẻ làm khung dài thêm 4 byte (1518 → 1522), không đụng MTU của IP</text>
+    </svg>
+    </div>
+    <figcaption>VLAN chỉ là 4 byte trong khung Ethernet. VM không bao giờ thấy thẻ; chỉ đoạn dây trunk (switch ↔ firewall) mang thẻ, và
+      firewall dựa vào VID để biết gói thuộc zone nào. Xem tận mắt: <code>sudo tcpdump -eni vnet14 vlan</code> (cổng trunk của core).</figcaption>
+  </figure>
+
+  </section>
+
+  <div style="display:grid;gap:20px">
+    <section class="card">
+      <h2>Bảng VLAN</h2>
+      <table>
+        <thead><tr><th>VLAN</th><th>Zone</th><th>Cổng trunk</th><th>Firewall giữ</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip kw">—</span></td><td>wan<br><span class="mono">10.99.0.0/24</span></td><td>không qua switch (mạng NAT riêng)</td><td>biên <span class="mono">.2</span>, VIP <span class="mono">.3</span></td></tr>
+          <tr><td><span class="chip k10">10</span></td><td>dmz<br><span class="mono">10.10.10.0/24</span></td><td>biên, core</td><td>biên <span class="mono">.253</span>, core <span class="mono">.252</span></td></tr>
+          <tr><td><span class="chip k20">20</span></td><td>lan<br><span class="mono">10.20.0.0/24</span></td><td>core</td><td>core <span class="mono">.253</span></td></tr>
+          <tr><td><span class="chip k40">40</span></td><td>mgmt<br><span class="mono">10.40.0.0/24</span></td><td>core</td><td>core <span class="mono">.253</span></td></tr>
+        </tbody>
+      </table>
+      <p class="note">VLAN ID khai trong <code>zones</code> của <code>hosts.yml</code> (GCP bỏ qua). Bật bằng <code>lab_vlan_trunk: true</code> trong <code>provisioned.yml</code>.</p>
+    </section>
+
+    <section class="card" id="rules">
+      <h2>Ma trận luật giữa các zone</h2>
+      <div class="scroll">
+      <table class="mx">
+        <thead><tr><th>Nguồn ↓ · đích →</th><th><span class="chip k10">10</span> DMZ</th><th><span class="chip k20">20</span> LAN</th><th><span class="chip k40">40</span> MGMT</th><th>Internet</th><th>DNS / NTP</th></tr></thead>
+        <tbody>
+          <tr><th scope='row'>Internet<br><span class='mono'>WAN biên</span></th><td>80, 443 → edge-01<br><span class='note'>port forward</span></td><td><span class="no">✗</span></td><td><span class="no">✗</span></td><td>—</td><td>UDP 51820 → VIP .3<br><span class='note'>WireGuard</span></td></tr>
+          <tr><th scope='row'>VPN admin<br><span class='mono'>10.50.0.2</span></th><td>443 → GUI biên .253</td><td>443 → GUI core .253</td><td>22, ping → jump-01</td><td><span class="no">✗</span></td><td>53 → core .253</td></tr>
+          <tr><th scope='row'><span class='chip k10'>10</span> DMZ<br><span class='mono'>edge-01</span></th><td><span class='note'>cùng VLAN</span></td><td>80, 443 → Gateway public .200</td><td>1514, 1515, 1516 → siem-01</td><td>80, 443</td><td>biên .253</td></tr>
+          <tr><th scope='row'><span class='chip k20'>20</span> LAN</th><td>22, 80, 443</td><td><span class='note'>cùng VLAN, không lọc</span></td><td>1514, 1515, 1516 → siem-01</td><td>chỉ infra-01: 80, 443<br><span class='note'>máy khác qua Squid</span></td><td>core .253</td></tr>
+          <tr><th scope='row'><span class='chip k40'>40</span> MGMT</th><td>jump-01: cổng quản trị</td><td>jump-01: 22, 80, 443, 3000, 6443, 8025<br>siem-01 → Gateway internal 443<br>MGMT → infra-01 443, 3128, 3100</td><td><span class='note'>cùng VLAN, không lọc</span></td><td><span class="no">✗</span> <span class='note'>(qua Squid)</span></td><td>core .253</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="note">Cổng TCP trừ khi ghi khác; DNS 53 TCP/UDP, NTP 123 UDP. LAN được ping mọi nơi (debug). Ô <span class="no">✗</span> và mọi thứ không ghi: chặn
+        và ghi log (luật cuối mỗi interface: 39, 49, 190, 290, 309). Hai firewall tự ra Internet: core 80, 443, 53, 123 qua biên. Nguồn:
+        <code>ansible/network/host_vars/firewall-*.yml</code> (alias trong <code>group_vars/firewalls.yml</code>). Luật “TẠM: LAN → Internet” chỉ bật
+        khi <code>egress_temp_open</code>.</p>
+    </section>
+
+    <section class="card">
+      <h2>DNS và NTP</h2>
+      <table>
+        <thead><tr><th>Máy</th><th>Hỏi</th><th>Đường đi</th></tr></thead>
+        <tbody>
+          <tr><td>VLAN 20, 40</td><td class="mono">core .253</td><td>cùng VLAN với firewall, không đổi VLAN. Unbound trên core trả lời tên nội bộ (<code>harbor</code>, <code>proxy</code>,
+            <code>mon.lab.internal</code>, <code>*.int.lab.internal</code>); tên khác core tự đệ quy ra Internet qua biên (luật biên 22)</td></tr>
+          <tr><td>VLAN 10 (edge-01)</td><td class="mono">biên .253</td><td>biên hỏi 1.1.1.1 ra WAN</td></tr>
+          <tr><td>VPN admin</td><td class="mono">core 10.20.0.253</td><td>qua biên → core (luật biên 302, core 43)</td></tr>
+        </tbody>
+      </table>
+      <p class="note">NTP giống DNS: mỗi máy lấy giờ từ firewall <code>.253</code> trong VLAN của nó (systemd-timesyncd), firewall lấy giờ từ Internet.</p>
+    </section>
+
+  </div>
+
+  <section class="card">
+    <h2>Xem trên máy</h2>
+    <pre>make libvirt-status               # VM, mạng, cổng switch kèm tag / trunks
+sudo ovs-vsctl show               # switch lab-sw và các cổng vnetN
+virsh -c qemu:///system net-dumpxml lab-sw   # portgroup: VLAN của từng cổng
+sudo ovs-appctl fdb/show lab-sw   # bảng MAC: cổng · VLAN · MAC (④)
+sudo tcpdump -eni vnet14 vlan     # khung có thẻ 802.1Q trên trunk core (⑥)</pre>
+  </section>
+</div>
+<script>
+// Zoom sơ đồ: 100% = kích thước gốc (viewBox), nút −/+ mỗi lần 20%, "Vừa khung" = vừa bề ngang; Ctrl+lăn chuột; kéo để cuộn
+document.querySelectorAll('.zfig').forEach(function (fig) {
+  var box = fig.querySelector('.zscroll'), svg = box.querySelector('svg'), val = fig.querySelector('.zval');
+  var base = svg.viewBox.baseVal.width, z = 1;
+  function set(nz, cx) {
+    nz = Math.min(3, Math.max(0.3, nz));
+    var px = (cx === undefined ? box.clientWidth / 2 : cx), fx = (box.scrollLeft + px) / (base * z);
+    var fy = (box.scrollTop + box.clientHeight / 2) / svg.getBoundingClientRect().height;
+    z = nz; svg.style.width = (base * z) + 'px'; svg.setAttribute('width', base * z);
+    box.scrollLeft = fx * base * z - px;
+    box.scrollTop = fy * svg.getBoundingClientRect().height - box.clientHeight / 2;
+    val.textContent = Math.round(z * 100) + '%';
+  }
+  function fit() { return (box.clientWidth - 2) / base; }
+  fig.querySelector('.ztool').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    var k = b.dataset.z;
+    set(k === 'in' ? z * 1.2 : k === 'out' ? z / 1.2 : k === 'fit' ? fit() : 1);
+  });
+  box.addEventListener('wheel', function (e) {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    set(z * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX - box.getBoundingClientRect().left);
+  }, { passive: false });
+  var drag = null;
+  box.addEventListener('pointerdown', function (e) {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    drag = { x: e.clientX, y: e.clientY, l: box.scrollLeft, t: box.scrollTop };
+    box.classList.add('drag'); box.setPointerCapture(e.pointerId);
+  });
+  box.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    box.scrollLeft = drag.l - (e.clientX - drag.x); box.scrollTop = drag.t - (e.clientY - drag.y);
+  });
+  ['pointerup', 'pointercancel'].forEach(function (ev) {
+    box.addEventListener(ev, function () { drag = null; box.classList.remove('drag'); });
+  });
+  set(1);
+});
+</script>

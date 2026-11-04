@@ -47,11 +47,12 @@ Một cluster luôn có (ít nhất) ba dải địa chỉ không được chồ
 
 Thêm một dải thứ tư cho traffic từ ngoài vào: **IP LoadBalancer** (lab: `metallb_pools` trong `plan.yml`) — phải nằm trong subnet của node để ARP hoạt động (MetalLB L2).
 
-Mô hình mạng Kubernetes đặt ra ba yêu cầu, mọi CNI phải thoả:
+Mô hình mạng Kubernetes đặt ra hai yêu cầu, mọi CNI phải thoả:
 
-1. Pod gọi được mọi pod khác trên mọi node **không qua NAT**.
-2. Agent trên node (kubelet…) gọi được mọi pod trên node đó.
-3. IP mà pod tự thấy là IP mà pod khác thấy nó.
+1. Mọi pod gọi được mọi pod khác, cùng node hay khác node, **trực tiếp, không qua proxy hay NAT**.
+2. Agent trên node (system daemon, kubelet…) gọi được mọi pod trên node đó.
+
+Hệ quả của yêu cầu 1: IP mà pod tự thấy cũng chính là IP mà pod khác thấy nó.
 
 Kubernetes core **không** hiện thực ba điều này — nó chỉ đặt ra hợp đồng. CNI hiện thực (mục 2).
 
@@ -63,9 +64,9 @@ Kubernetes core **không** hiện thực ba điều này — nó chỉ đặt ra
 
 CNI là một **spec + bộ binary**, không phải daemon bắt buộc:
 
-- Cấu hình: `/etc/cni/net.d/*.conflist` (file đầu tiên theo thứ tự tên được dùng).
+- Cấu hình: `/etc/cni/net.d/*.conflist`. Spec không quy định chọn file nào; containerd/CRI-O dùng file đầu tiên theo thứ tự tên — vì vậy file cũ của CNI khác còn sót lại có thể "thắng".
 - Binary: `/opt/cni/bin/` (cilium-cni, bridge, host-local, portmap, loopback…).
-- Container runtime (containerd / CRI-O — **không phải kubelet** kể từ khi bỏ dockershim) gọi binary với lệnh `ADD` / `DEL` / `CHECK` (spec 1.1 thêm `GC`, `STATUS`), truyền đường dẫn netns qua biến môi trường, cấu hình qua stdin; plugin trả về IP đã cấp qua stdout.
+- Container runtime (containerd / CRI-O — **không phải kubelet** kể từ khi bỏ dockershim) gọi binary với `CNI_COMMAND` = `ADD` / `DEL` / `CHECK` / `GC` / `VERSION` (spec còn có `STATUS`), truyền đường dẫn netns qua biến môi trường `CNI_NETNS`, cấu hình qua stdin; plugin trả về kết quả (IP đã cấp) qua stdout.
 - Plugin có thể xâu chuỗi (`plugins: [...]` trong conflist): một plugin tạo interface, plugin sau thêm port mapping, bandwidth…
 
 Luồng tạo pod:
@@ -102,7 +103,7 @@ Trước đây nhiều app trên cùng server dùng chung IP nên tranh nhau por
 IP được cấp theo **pod**, không theo container. Khi tạo pod, runtime tạo một **network namespace** (giữ bởi container `pause`), rồi mọi container trong pod join vào namespace đó. Hệ quả:
 
 - Các container trong một pod chung IP, chung bảng route, gọi nhau qua `localhost` — và **vẫn tranh port với nhau** (sidecar không được listen trùng port với app).
-- `hostNetwork: true` thì pod dùng luôn netns của node: IP node, tranh port với mọi thứ trên node, và thường **không bị NetworkPolicy chi phối**.
+- `hostNetwork: true` thì pod dùng luôn netns của node: IP node, tranh port với mọi thứ trên node. Theo spec, NetworkPolicy với pod hostNetwork là **không xác định**: tuỳ CNI, policy được áp như pod thường hoặc bị bỏ qua (traffic bị coi như traffic của node).
 
 ### Cơ chế
 
@@ -200,7 +201,7 @@ PREROUTING / OUTPUT (bảng nat)
 
 - Chọn backend **ngẫu nhiên theo xác suất** (1/3, rồi 1/2 của phần còn lại, rồi phần cuối → đều nhau). Không phải round-robin, không biết tải.
 - Quyết định chỉ xảy ra ở **gói đầu tiên** của kết nối; **conntrack** nhớ ánh xạ, các gói sau và gói trả lời được dịch ngược tự động. Hệ quả quan trọng: **kết nối dài (HTTP/2, gRPC, WebSocket, connection pool) dính cố định vào một pod** → scale thêm pod không chia tải cho kết nối cũ. Cần load-balance ở L7 (client-side gRPC LB, mesh, hoặc giới hạn tuổi kết nối).
-- Chi phí rule tăng tuyến tính theo số Service × endpoint; cluster lớn chuyển sang **IPVS** (bảng hash trong kernel, nhiều thuật toán LB) hoặc **nftables** (chế độ mới, thay iptables).
+- Chi phí rule tăng tuyến tính theo số Service × endpoint. Hướng đi chính thức là chế độ **nftables** (xử lý gói hiệu quả hơn, khác biệt chỉ thấy rõ ở cluster hàng chục nghìn Service). Chế độ **IPVS** đã **deprecated từ v1.35**, sẽ bị tắt mặc định từ v1.40 và gỡ hẳn ở v1.43 — không chọn cho cluster mới.
 - `sessionAffinity: ClientIP` ghim client vào một pod (theo IP nguồn, timeout mặc định 3 giờ).
 
 **Cilium kube-proxy replacement (lab: `kubeProxyReplacement=true`, không có kube-proxy):**
@@ -222,7 +223,7 @@ Khi pod bị xoá, hai việc xảy ra **song song, không đồng bộ**: kubel
 - **ExternalName** — chỉ là bản ghi DNS **CNAME**, không IP, không proxy, không áp được port mapping. Gọi HTTPS qua nó thì `Host`/SNI vẫn là tên nội bộ → hay lỗi certificate.
 - **Headless** (`clusterIP: None`) — không IP ảo; DNS trả thẳng IP từng pod. Dùng cho StatefulSet và client tự load-balance (gRPC, driver database).
 
-`internalTrafficPolicy: Local` buộc traffic nội bộ chỉ tới backend trên cùng node (ví dụ agent DaemonSet). `trafficDistribution: PreferClose` ưu tiên backend cùng zone để tránh phí traffic liên zone.
+`internalTrafficPolicy: Local` buộc traffic nội bộ chỉ tới backend trên cùng node (ví dụ agent DaemonSet). `trafficDistribution: PreferSameZone` ưu tiên backend cùng zone (tránh phí traffic liên zone), `PreferSameNode` ưu tiên backend cùng node. `PreferClose` là tên cũ của `PreferSameZone`, đã deprecated.
 
 ### Debug
 
@@ -262,11 +263,15 @@ MetalLB không phải load balancer nằm trên đường dữ liệu; nó chỉ
 - Không thực sự cân bằng tải ở tầng mạng; băng thông bị giới hạn bởi một node.
 - Node đó chết → node khác nhận, gửi **gratuitous ARP**; failover mất vài giây và phụ thuộc switch/client cập nhật ARP cache.
 - Với `externalTrafficPolicy: Local`, chỉ node có backend mới được bầu.
-- Cloud VPC (như GCP) thường **không truyền ARP tự do** giữa VM như switch L2 thật — L2 mode chạy được hay không tuỳ cách mạng được dựng (lab có OPNsense/VLAN riêng); nếu IP LB "không ping được" thì nghi ARP trước.
+- Trên cloud, ARP do lớp mạng ảo **giả lập**: VPC chỉ chuyển tới VM những IP mà cloud đã gán cho VM đó, nên câu trả lời ARP của MetalLB vô tác dụng. Doc MetalLB ghi rõ Google Cloud (cũng như AWS, Azure) **không được hỗ trợ**.
+
+> **Lab:**
+> - **on-prem:** L2 thật, MetalLB hoạt động đúng như mô tả ở trên (ARP, failover giữa các node).
+> - **GCP:** lab lách bằng **alias IP**: tofu gán IP của hai Gateway (`gateway_public`, `gateway_internal`) làm alias `/32` cố định trên `k8s-worker-01`, VIP API (`api_vip`) trên `k8s-master-01` (`envs/gcp/plan.yml`, `tofu/envs/gcp/main.tf`). VPC luôn định tuyến các IP đó tới đúng VM, không cần ARP. MetalLB lúc này chỉ còn vai trò cấp IP cho Service — **không có failover**: VM giữ alias chết thì IP đó chết theo.
 
 **Chế độ BGP:** mỗi node quảng bá IP LB tới router; router chia tải ECMP trên nhiều node — load balance thật, failover nhanh, nhưng cần router hỗ trợ BGP.
 
-**kube-vip** trong lab làm việc tương tự (ARP) cho **VIP của API server** (`api_endpoint`), không phải cho Service.
+**kube-vip** trong lab làm việc tương tự (ARP) cho **VIP của API server** (`api_endpoint`), không phải cho Service. Trên GCP, VIP này cũng là alias IP cố định trên `k8s-master-01`.
 
 ---
 
@@ -326,7 +331,9 @@ spec:
 - `mode: Terminate` — proxy giải mã bằng cert trong Secret (thường do cert-manager cấp/gia hạn), rồi gửi HTTP (hoặc HTTPS lại) tới backend. Proxy đọc được HTTP → route L7 được.
 - `mode: Passthrough` (với `TLSRoute`) — proxy chỉ đọc **SNI** trong ClientHello để route, không giải mã; backend tự giữ cert.
 
-> **Lab:** `gatewayClassName: cilium`. Với mỗi `Gateway`, Cilium tạo một Service LoadBalancer `cilium-gateway-<tên>` → MetalLB cấp IP; traffic được eBPF chuyển vào **Envoy chạy trên từng node** do Cilium quản lý, Envoy route theo HTTPRoute rồi gửi tới pod.
+> **Lab:** `gatewayClassName: cilium`. Với mỗi `Gateway`, Cilium tạo một Service type LoadBalancer tên `cilium-gateway-<tên Gateway>` → MetalLB cấp IP. Khi traffic tới port của Service đó, eBPF chặn lại và chuyển trong suốt vào **Envoy trên node** (dùng TPROXY của kernel — mặc định qua iptables, nên node phải có module TPROXY; thiếu thì kết nối tới Gateway timeout mà không bao giờ tới Envoy; tuỳ chọn beta `bpf.tproxy=true` bỏ phụ thuộc này). Envoy route theo HTTPRoute rồi gửi tới pod.
+>
+> Policy có **hai điểm kiểm soát**: traffic từ ngoài (identity `world`) → Envoy (identity `ingress`), rồi `ingress` → pod backend. Khi bật default-deny phải mở cả hai chặng.
 
 ### Debug
 
@@ -364,7 +371,8 @@ Các `dnsPolicy` khác: `Default` (dùng resolv.conf của node — **không** p
 - `_http._tcp.payment.shop.svc.cluster.local` → **SRV**: port theo tên port của Service.
 - StatefulSet + headless Service: `db-0.db.shop.svc.cluster.local` → IP của đúng pod `db-0` — danh tính mạng ổn định cho từng replica.
 - Tên ngoài cluster → plugin `forward` chuyển lên DNS upstream (từ resolv.conf của node).
-- Corefile (ConfigMap `coredns` trong `kube-system`) gồm các plugin: `kubernetes` (sinh bản ghi từ API), `forward`, `cache` (mặc định 30s), `loop` (phát hiện vòng lặp forward), `health`, `ready`.
+- Corefile (ConfigMap `coredns` trong `kube-system`) mặc định của kubeadm gồm: `kubernetes cluster.local …` (sinh bản ghi từ API, `ttl 30`, `pods insecure`), `forward . /etc/resolv.conf`, `cache 30`, `loop` (phát hiện vòng lặp forward), `reload`, `loadbalance`, `health`, `ready`, `prometheus :9153`.
+- Bản kubeadm mới còn đặt `disable success/denial cluster.local` trong `cache`: tên trong cluster **không bị cache** ở CoreDNS (plugin `kubernetes` trả lời thẳng từ dữ liệu watch API, client nhận TTL 30s), chỉ tên ngoài được cache 30s. Cluster dựng bằng kubeadm cũ hơn có thể chưa có dòng này — xem ConfigMap thực tế.
 
 ### `ndots:5` và cái giá ẩn
 
@@ -414,6 +422,7 @@ Mặc định không có giới hạn nào giữa các pod. NetworkPolicy là **
 - Không ghi `policyTypes` → mặc định `[Ingress]`, cộng thêm `Egress` chỉ khi policy có mục `egress`. Một policy rỗng chỉ có `podSelector` → chặn **vào**, không chặn **ra**.
 - Các policy **cộng dồn** (union). Không có rule deny, không có thứ tự ưu tiên.
 - Kết nối A → B được phép khi **egress của A** và **ingress của B** cùng cho phép. Gói trả lời tự đi qua (stateful, dựa trên conntrack / eBPF CT).
+- Hai ngoại lệ theo spec: traffic **từ node đang chạy pod** vào pod luôn được phép (nhờ vậy probe của kubelet không bị chặn), và pod **không tự chặn được chính nó**.
 - Policy đánh giá tại **pod**, sau khi Service đã DNAT → `ports` là **port của pod** (`targetPort`), không phải port của Service; và rule cho phép "tới Service" phải viết theo label pod backend.
 
 ### Bẫy kinh điển: AND hay OR
@@ -558,7 +567,7 @@ Mesh là một hệ phân tán thật: control plane, CA, upgrade proxy, độ t
 
 - **`externalIPs` (CVE-2020-8554):** ai tạo được Service là gán được `spec.externalIPs` bất kỳ → kube-proxy trên mọi node chặn và chuyển traffic tới IP đó vào pod của họ (man-in-the-middle bên trong cluster). Bật admission plugin `DenyServiceExternalIPs` hoặc policy (Kyverno/Gatekeeper) cấm field này. Tương tự với quyền patch `status.loadBalancer`.
 - **NodePort mở trên mọi node, mọi interface** — kể cả Service bạn chỉ định dùng nội bộ, nếu ai đó đổi type. Firewall ở biên nên chặn dải `30000–32767` từ ngoài nếu không dùng.
-- **`hostNetwork` / `NET_RAW` / `NET_ADMIN`:** pod hostNetwork thấy toàn bộ mạng node và không chịu NetworkPolicy; `NET_RAW` cho phép tạo gói tuỳ ý (ARP/IP spoofing trong mạng L2). Pod Security Standards mức `restricted` cấm những thứ này — nên áp cho namespace workload.
+- **`hostNetwork` / `NET_RAW` / `NET_ADMIN`:** pod hostNetwork thấy toàn bộ mạng node và không chịu NetworkPolicy; `NET_RAW` cho phép tạo gói tuỳ ý (ARP/IP spoofing trong mạng L2). Pod Security Standards mức **`baseline`** đã cấm `hostNetwork` và cấm thêm capability ngoài danh sách cho phép (danh sách này không có `NET_RAW`, `NET_ADMIN`); mức `restricted` chặt hơn nữa (bắt buộc drop `ALL`, chỉ được thêm `NET_BIND_SERVICE`). Nên áp ít nhất `baseline` cho mọi namespace workload.
 - **Mạng L2 phẳng của node:** MetalLB L2 và kube-vip đều tin vào ARP; máy nào trong cùng segment cũng có thể giành IP bằng ARP giả. Tách VLAN cho node (lab có OPNsense ở biên) là lớp bảo vệ chính.
 - **Metadata server** của cloud (mục 13).
 - **Không mã hoá mặc định:** traffic pod ↔ pod, kể cả giữa các node qua mạng vật lý, là plaintext trừ khi bật WireGuard/IPsec hoặc mesh (mục 10).
@@ -602,7 +611,7 @@ API server gọi webhook (cert-manager, Kyverno, operator…) như một client 
 
 ### Probe của kubelet
 
-Liveness/readiness probe xuất phát từ **kubelet trên chính node đó** (netns của node). Hầu hết CNI luôn cho phép traffic từ host cục bộ vào pod (Cilium: mặc định cho phép từ entity `host`) để probe không bị policy giết. Nếu tắt hành vi này thì phải mở tường minh, nếu không pod bị restart vòng lặp.
+Liveness/readiness probe xuất phát từ **kubelet trên chính node đó** (netns của node). Spec NetworkPolicy quy định traffic từ node của pod vào pod **luôn được phép**, nên probe không bị policy chặn. Với CiliumNetworkPolicy, nguồn này là entity `host`; Cilium mặc định cũng cho phép host cục bộ vào endpoint. Nếu tắt hành vi đó (tuỳ chọn allow-localhost của Cilium) thì phải mở tường minh, không thì pod bị restart vòng lặp.
 
 ### Port cần mở giữa các node (lab)
 
@@ -613,12 +622,13 @@ Liveness/readiness probe xuất phát từ **kubelet trên chính node đó** (n
 | 10250       | TCP       | kubelet                                                |
 | 8472        | UDP       | VXLAN của Cilium (pod ↔ pod khác node)                 |
 | 4240        | TCP       | cilium-health (kiểm tra kết nối node ↔ node)           |
-| 4244        | TCP       | Hubble server trên từng node (Hubble Relay đọc)        |
+| 4244        | TCP       | Hubble server trên từng node                           |
+| 4245        | TCP       | Hubble Relay                                           |
 | 7946        | TCP + UDP | MetalLB memberlist (speaker phát hiện node chết)       |
 | 30000–32767 | TCP/UDP   | NodePort (nếu public trực tiếp)                        |
-| ICMP        | —         | PMTUD + cilium-health; chặn hết ICMP là tự gây lỗi MTU |
+| ICMP 8/0, 0/0 | —       | cilium-health (echo); thêm ICMP "fragmentation needed" (3/4) cho PMTUD — chặn hết ICMP là tự gây lỗi MTU |
 
-Bật WireGuard của Cilium thì cần thêm UDP 51871.
+Bật WireGuard của Cilium thì cần thêm UDP 51871; bật mutual authentication thì thêm TCP 4250. Lab không chạy kube-proxy nên không cần TCP 10256 (health check của kube-proxy) như bảng port chuẩn của Kubernetes.
 
 ---
 
@@ -768,7 +778,10 @@ Trình duyệt hỏi resolver của nó (OS cache → DNS nội bộ / ISP → a
 
 ### Pha 2 — tới được node: L2/L3
 
-Gói SYN đầu tiên đi qua router/firewall biên (OPNsense trong lab) tới subnet của node. Router cần MAC của IP LB → **ARP** → speaker MetalLB trên **node leader** trả lời bằng MAC của nó. Từ giờ **mọi kết nối tới IP này vào node leader**.
+Gói SYN đầu tiên đi qua router/firewall biên (OPNsense trong lab) tới subnet của node.
+
+- **on-prem:** router cần MAC của IP LB → **ARP** → speaker MetalLB trên **node leader** trả lời bằng MAC của nó. Từ giờ **mọi kết nối tới IP này vào node leader**.
+- **GCP:** không có ARP thật; VPC định tuyến IP Gateway tới `k8s-worker-01` vì IP là alias của VM đó (mục 6). "Node leader" ở các pha sau chính là `k8s-worker-01`.
 
 - **Hỏng:** không có ai trả lời ARP (MetalLB chưa chạy, pool sai subnet, mạng không truyền ARP) → SYN rơi vào hư không → client timeout khi connect.
 - **Quan sát:** `arping <IP LB>` từ máy cùng subnet; `kubectl -n metallb-system logs` speaker; `tcpdump -ni <nic> arp`.
@@ -776,7 +789,7 @@ Gói SYN đầu tiên đi qua router/firewall biên (OPNsense trong lab) tới s
 ### Pha 3 — vào node, tới Envoy
 
 1. SYN tới NIC `node_interface`. Chương trình **eBPF trên tc ingress** của Cilium thấy đích là IP của Service LoadBalancer `cilium-gateway-…`.
-2. Vì đó là Service của Gateway, Cilium chuyển kết nối vào **Envoy trên chính node này** (không DNAT sang node khác). Tạo entry **connection tracking** để các gói sau và gói trả lời đi đúng đường.
+2. Vì đó là Service của Gateway, Cilium chuyển trong suốt kết nối (TPROXY) vào **Envoy trên chính node này** (không DNAT sang node khác). Tạo entry **connection tracking** để các gói sau và gói trả lời đi đúng đường.
 3. Envoy nhận kết nối trên listener ứng với port 443 → kết thúc **bắt tay TCP** (client ↔ Envoy).
 
 Envoy chạy trên node nhận, không có SNAT trước nó → Envoy thấy **IP client thật** (trừ khi firewall biên đã NAT trước đó). Nó ghi IP này vào `X-Forwarded-For`.
@@ -797,7 +810,7 @@ Envoy chạy trên node nhận, không có SNAT trước nó → Envoy thấy **
 ### Pha 5 — HTTP và routing ở Envoy
 
 1. Trình duyệt gửi request trên một **stream HTTP/2**: `:authority myapp.example.com`, `:path /shop/cart`.
-2. Envoy duyệt các `HTTPRoute` gắn vào listener: khớp `hostnames`, rồi `matches` (path, header, query, method). Match cụ thể hơn thắng (path exact > prefix dài hơn > …).
+2. Envoy duyệt các `HTTPRoute` gắn vào listener: khớp `hostnames`, rồi `matches` (path, header, query, method). Khi nhiều match cùng khớp, spec quy định thứ tự ưu tiên: path `Exact` → `PathPrefix` dài nhất → có match method → nhiều header match nhất → nhiều query match nhất. Vẫn hoà thì route tạo sớm nhất thắng, rồi tới thứ tự chữ cái `namespace/name`, rồi rule đứng trước trong cùng route. Không rule nào khớp → `404`.
 3. Áp `filters`: rewrite path (`/shop/cart` → `/cart`), thêm/xoá header, redirect (trả 301/302 ngay, không tới backend).
 4. Envoy bổ sung header: `X-Forwarded-For`, `X-Forwarded-Proto: https`, `X-Request-Id` (dùng để lần theo request qua log), có thể cả header tracing (`traceparent`) nếu bật.
 5. Chọn **backend** theo `backendRefs` + `weight` (ví dụ 90/10 canary), rồi chọn **một endpoint** (IP pod) trong backend đó theo thuật toán LB của Envoy (mặc định round-robin / least-request tuỳ cấu hình) — theo **từng request**, không theo kết nối.
@@ -814,7 +827,7 @@ Envoy chạy trên node nhận, không có SNAT trước nó → Envoy thấy **
 
 Kết nối Envoy ↔ pod là **plaintext** (TLS đã kết thúc ở Envoy) trừ khi có mesh hoặc WireGuard giữa node.
 
-- **Hỏng:** `503 UF` (upstream connect fail — policy drop, pod chết, sai `targetPort`); treo với payload lớn (MTU); `504 UT` (backend quá chậm, vượt timeout của route — Envoy mặc định 15s nếu không đặt `timeouts` trong HTTPRoute).
+- **Hỏng:** `503 UF` (upstream connect fail — policy drop, pod chết, sai `targetPort`); treo với payload lớn (MTU); `504 UT` (backend quá chậm, vượt timeout của route). Timeout mặc định của route trong Envoy là **15s**; Cilium chỉ ghi đè khi HTTPRoute có `timeouts` (field mức *Extended* của Gateway API). Request chạy lâu hơn 15s (upload, báo cáo, streaming) phải đặt `timeouts.request` tường minh.
 - **Quan sát:** `hubble observe --to-pod shop/<pod> --verdict DROPPED`; `tcpdump -ni <nic> udp port 8472` trên hai node.
 
 ### Pha 7 — bên trong pod `shop`
@@ -828,7 +841,7 @@ Kết nối Envoy ↔ pod là **plaintext** (TLS đã kết thúc ở Envoy) tr�
 
 ### Pha 8 — `shop` gọi `payment` (east-west)
 
-1. **DNS:** app gọi `payment` → resolver trong pod đọc `/etc/resolv.conf` → vì `ndots:5`, thử `payment.shop.svc.cluster.local` trước → gửi tới `10.96.0.10` (kube-dns). Socket-LB của Cilium đổi đích ClusterIP của kube-dns thành IP một pod CoreDNS. Egress policy của `shop` phải cho phép UDP/TCP 53 tới CoreDNS. CoreDNS trả **ClusterIP** của Service `payment` (cache TTL 30s). Nếu có policy `toFQDNs`, DNS proxy của Cilium đứng ở giữa và đọc câu trả lời để cập nhật policy.
+1. **DNS:** app gọi `payment` → resolver trong pod đọc `/etc/resolv.conf` → vì `ndots:5`, thử `payment.shop.svc.cluster.local` trước → gửi tới `10.96.0.10` (kube-dns). Socket-LB của Cilium đổi đích ClusterIP của kube-dns thành IP một pod CoreDNS. Egress policy của `shop` phải cho phép UDP/TCP 53 tới CoreDNS. CoreDNS trả **ClusterIP** của Service `payment` (TTL 30s). Nếu có policy `toFQDNs`, DNS proxy của Cilium đứng ở giữa và đọc câu trả lời để cập nhật policy.
 2. **`connect()` tới ClusterIP:8080:** hook eBPF trên cgroup của pod đổi đích thành IP một pod `payment` **ngay trong syscall** — gói tin rời pod đã mang IP pod thật, không có DNAT trên đường đi.
 3. **Egress policy** của `shop` (tới identity của `payment`, port 8080) → VXLAN sang node C → **ingress policy** của `payment` → vào pod.
 4. Nếu có service mesh: proxy hai đầu (sidecar hoặc ztunnel) bắt tay **mTLS** với SPIFFE ID của `sa/shop` và `sa/payment` trước khi dữ liệu đi; `AuthorizationPolicy` quyết định theo danh tính.
@@ -899,7 +912,7 @@ t0+terminationGracePeriodSeconds (mặc định 30s)  SIGKILL nếu app chưa th
 | Policy "không có tác dụng"                  | CNI không thực thi; sai AND/OR trong `from`; `ports` dùng port Service thay vì port pod                         |
 | App không thấy IP client                    | `externalTrafficPolicy: Cluster` SNAT → `Local` hoặc `X-Forwarded-For`                                          |
 | `EXTERNAL-IP <pending>`                     | không có MetalLB/cloud controller, hoặc pool hết IP                                                             |
-| IP LoadBalancer không ping được             | ARP không tới (L2 mode trên mạng không phải L2 thật), leader node có vấn đề                                     |
+| IP LoadBalancer không ping được | on-prem: ARP không tới / node leader có vấn đề; GCP: VM giữ alias IP chết (không có failover) |
 | HTTPRoute không chạy                        | `kubectl describe httproute` → `Accepted` / `ResolvedRefs`                                                      |
 | Node `NotReady` sau `kubeadm init`          | chưa cài CNI                                                                                                    |
 | `kubectl exec/logs` lỗi, pod vẫn chạy       | firewall chặn API server → kubelet 10250                                                                        |

@@ -1,0 +1,148 @@
+# Cấu hình controller (play 4): known_hosts → JCasC → restart / reload → kiểm tra agent.
+# Thông tin agent (IP, host key) đọc trực tiếp từ agent bằng delegate_to → chạy được cả khi
+# --limit không gồm mọi agent (agent ngoài limit vẫn phải SSH được).
+- name: Agent list
+  ansible.builtin.set_fact:
+    agents: "{{ groups['jenkins_agents'] | default([]) }}"
+
+# ---------------- Thu thập thông tin agent ----------------
+- name: Network facts of agents not in this run (--limit)
+  ansible.builtin.setup:
+    gather_subset: ['!all', '!min', network]
+  delegate_to: "{{ item }}"
+  delegate_facts: true
+  loop: "{{ agents }}"
+  when: hostvars[item].ansible_facts.default_ipv4 is not defined
+
+- name: Read agent SSH host keys
+  ansible.builtin.slurp:
+    src: /etc/ssh/ssh_host_ed25519_key.pub
+  delegate_to: "{{ item }}"
+  loop: "{{ agents }}"
+  register: agent_hostkeys
+
+- name: Trust agent host keys
+  ansible.builtin.known_hosts:
+    path: "{{ jenkins_home }}/.ssh/known_hosts"
+    name: "{{ address }}"
+    key: "{{ address }} {{ (item.content | b64decode).split()[0:2] | join(' ') }}"
+  vars:
+    address: "{{ hostvars[item.item].jenkins_agent_address }}"
+  loop: "{{ agent_hostkeys.results }}"
+  loop_control:
+    label: "{{ item.item }} ({{ address }})"
+  become: true
+  become_user: jenkins
+
+# ---------------- Ghi cấu hình ----------------
+- name: CasC dirs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: jenkins
+    mode: "0750"
+  loop: [/etc/jenkins, "{{ jenkins_casc_dir }}", "{{ jenkins_secrets_dir }}"]
+
+- name: Admin password secret
+  ansible.builtin.copy:
+    dest: "{{ jenkins_secrets_dir }}/admin_password"
+    content: "{{ jenkins_admin_password }}"
+    owner: root
+    group: jenkins
+    mode: "0640"
+  no_log: true
+  register: admin_secret
+
+- name: jenkins.yaml (JCasC)
+  ansible.builtin.template:
+    src: jenkins.yaml.j2
+    dest: "{{ jenkins_casc_dir }}/jenkins.yaml"
+    owner: root
+    group: jenkins
+    mode: "0640"
+  register: casc_file
+
+# ---------------- Áp dụng thay đổi ----------------
+#   restart : có file jenkins_restart_marker (service / war / plugin / Java đổi — kể cả từ lần chạy trước bị lỗi)
+#   reload  : chỉ đổi JCasC hoặc mật khẩu admin — nạp lại cấu hình, không ngắt job đang chạy
+#   none    : không đổi gì
+# Jenkins đang tắt thì bước start nạp luôn cấu hình mới → không cần reload.
+- name: Restart pending?
+  ansible.builtin.stat:
+    path: "{{ jenkins_restart_marker }}"
+  register: restart_marker
+
+- name: Decide restart / reload
+  ansible.builtin.set_fact:
+    jenkins_apply: >-
+      {{ 'restart' if restart_marker.stat.exists
+         else 'reload' if (casc_file is changed or admin_secret is changed)
+         else 'none' }}
+
+# Nếu trước đó Jenkins crash-loop, systemd chặn start ("Start request repeated too quickly")
+- name: Clear systemd start-limit state
+  ansible.builtin.command: systemctl reset-failed jenkins
+  changed_when: false
+  failed_when: false
+
+# daemon_reload luôn bật: unit / drop-in có thể vừa đổi mà Jenkins đang tắt (chỉ start, không restart)
+- name: Start / restart Jenkins
+  ansible.builtin.systemd:
+    name: jenkins
+    state: "{{ 'restarted' if jenkins_apply == 'restart' else 'started' }}"
+    enabled: true
+    daemon_reload: true
+  register: jenkins_service
+
+- name: Wait for Jenkins (login page)
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ jenkins_http_port }}/login"
+  register: ui
+  until: ui.status == 200
+  retries: 60
+  delay: 5
+
+- name: Clear restart marker
+  ansible.builtin.file:
+    path: "{{ jenkins_restart_marker }}"
+    state: absent
+
+- name: Reload JCasC (no restart)
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ jenkins_http_port }}/reload-configuration-as-code/?casc-reload-token={{ jenkins_casc_reload_token }}"
+    method: POST
+    status_code: [200, 302]
+  when: jenkins_apply == 'reload' and jenkins_service is not changed
+  no_log: true
+
+# ---------------- Kiểm tra ----------------
+- name: Admin login works
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ jenkins_http_port }}/whoAmI/api/json"
+    url_username: "{{ jenkins_admin_user }}"
+    url_password: "{{ jenkins_admin_password }}"
+    force_basic_auth: true
+  register: whoami
+  failed_when: whoami.status != 200 or whoami.json.name != jenkins_admin_user
+  no_log: true
+
+- name: Check agents are online
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ jenkins_http_port }}/computer/{{ item }}/api/json?tree=offline"
+    url_username: "{{ jenkins_admin_user }}"
+    url_password: "{{ jenkins_admin_password }}"
+    force_basic_auth: true
+  register: node
+  until: node.json is defined and not node.json.offline
+  retries: 24
+  delay: 5
+  loop: "{{ agents }}"
+  no_log: true
+
+- name: Show access info
+  ansible.builtin.debug:
+    msg:
+      - "Source: {{ jenkins_install_source }} — Mode: {{ 'controller + ' ~ (agents | length) ~ ' agent(s)' if agents else 'standalone' }}"
+      - "URL: {{ jenkins_url }}"
+      - "User: {{ jenkins_admin_user }} — password: credentials/jenkins_admin_password (trên máy chạy Ansible)"

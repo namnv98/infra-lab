@@ -1,0 +1,46 @@
+# Cài Jenkins controller (play 2). Cấu hình JCasC + restart/reload ở configure.yml (play 4, sau khi agent xong).
+#
+# Task nào làm Jenkins phải restart thì `notify: Restart pending` → handler tạo file jenkins_restart_marker.
+# configure.yml thấy file đó thì restart rồi xóa. Chưa restart ở đây vì Jenkins chỉ boot đúng khi đã có JCasC.
+
+- name: Java, git
+  ansible.builtin.include_role:
+    name: jenkins_common
+
+- name: Java changed → Jenkins must restart
+  ansible.builtin.debug:
+    msg: Java vừa cài / đổi
+  when: jenkins_java_changed | bool
+  changed_when: true
+  notify: Restart pending
+
+- name: Install Jenkins
+  ansible.builtin.import_tasks: install.yml
+
+- name: Plugins
+  ansible.builtin.import_tasks: plugins.yml
+
+# ---------------- SSH key controller → agent (sinh 1 lần) ----------------
+- name: Controller SSH dir
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/.ssh"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0700"
+
+- name: Controller SSH key
+  ansible.builtin.command: ssh-keygen -t ed25519 -N "" -C jenkins-controller -f {{ jenkins_home }}/.ssh/id_ed25519
+  args:
+    creates: "{{ jenkins_home }}/.ssh/id_ed25519"
+  become: true
+  become_user: jenkins
+
+- name: Read controller public key
+  ansible.builtin.slurp:
+    src: "{{ jenkins_home }}/.ssh/id_ed25519.pub"
+  register: controller_pubkey
+
+- name: Expose public key to agents (hostvars → play 3)
+  ansible.builtin.set_fact:
+    jenkins_controller_pubkey: "{{ controller_pubkey.content | b64decode | trim }}"

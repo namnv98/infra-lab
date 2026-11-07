@@ -1,0 +1,79 @@
+# Plugin: online → plugin manager tải plugin còn thiếu (kèm dependency) từ update center;
+#         offline → giải nén plugins.tar.gz từ bundle (chỉ khi archive đổi).
+# Chỉ THÊM plugin, không gỡ / không nâng plugin đã có.
+- name: Plugins dir
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/plugins"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0755"
+
+# ---------------- Online ----------------
+- name: Plugins from update center (online)
+  when: jenkins_install_source == 'online'
+  block:
+    - name: Plugin manager jar
+      ansible.builtin.get_url:
+        url: "{{ jenkins_plugin_manager_url }}"
+        checksum: "sha256:{{ jenkins_plugin_manager_url }}.sha256"
+        dest: /opt/jenkins-plugin-manager.jar
+        mode: "0644"
+
+    - name: List installed plugins
+      ansible.builtin.find:
+        paths: "{{ jenkins_home }}/plugins"
+        patterns: "*.jpi,*.hpi"
+      register: installed_plugins
+
+    # Thường: chỉ tải plugin còn thiếu. jenkins_upgrade: đưa mọi plugin đã cài vào danh sách → plugin manager
+    # nâng cái nào cũ hơn bản mới nhất. "changed" = có file .jpi mới / bị thay (so danh sách tên + mtime).
+    - name: Install missing plugins (upgrade all if jenkins_upgrade)
+      ansible.builtin.shell: |
+        set -e
+        snapshot() { find {{ jenkins_home }}/plugins -maxdepth 1 -name '*.jpi' -printf '%f %T@\n' | sort; }
+        before=$(snapshot)
+        {{ jenkins_java_bin }} -jar /opt/jenkins-plugin-manager.jar \
+          --war {{ jenkins_war }} \
+          --plugin-download-directory {{ jenkins_home }}/plugins \
+          --plugins {{ wanted | join(' ') }}
+        [ "$before" = "$(snapshot)" ] && echo PLUGINS_UNCHANGED || true
+      vars:
+        installed: "{{ installed_plugins.files | map(attribute='path') | map('basename') | map('regex_replace', '\\.[jh]pi$', '') | list }}"
+        wanted: "{{ (jenkins_plugins + installed) | unique if jenkins_upgrade | bool else jenkins_plugins | difference(installed) }}"
+      become: true
+      become_user: jenkins
+      when: wanted | length > 0
+      register: plugins_install
+      changed_when: "'PLUGINS_UNCHANGED' not in plugins_install.stdout"
+      retries: 3
+      delay: 10
+      until: plugins_install is succeeded
+      notify: Restart pending
+
+# ---------------- Offline ----------------
+- name: Plugins from bundle (offline)
+  when: jenkins_install_source == 'offline'
+  block:
+    - name: Copy plugins archive
+      ansible.builtin.copy:
+        src: "{{ jenkins_bundle_dir }}/{{ jenkins_bundle.plugins_archive }}"
+        dest: /var/cache/jenkins/plugins.tar.gz
+        mode: "0644"
+
+    # unarchive (tar) tự so khác biệt → chỉ "changed" khi có plugin mới / khác
+    - name: Unpack plugins
+      ansible.builtin.unarchive:
+        src: /var/cache/jenkins/plugins.tar.gz
+        dest: "{{ jenkins_home }}/plugins"
+        remote_src: true
+        owner: jenkins
+        group: jenkins
+      notify: Restart pending
+
+- name: Verify all plugins are present
+  ansible.builtin.stat:
+    path: "{{ jenkins_home }}/plugins/{{ item }}.jpi"
+  loop: "{{ jenkins_plugins }}"
+  register: plugin_files
+  failed_when: not plugin_files.stat.exists

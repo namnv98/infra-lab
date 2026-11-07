@@ -1,5 +1,0 @@
-jenkins_repo_url: https://pkg.jenkins.io/debian-stable
-jenkins_key_url: https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
-jenkins_home: /var/lib/jenkins
-jenkins_war: /usr/share/java/jenkins.war
-jenkins_casc_dir: /etc/jenkins/casc

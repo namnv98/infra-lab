@@ -1,0 +1,82 @@
+# Phần chung của controller và agent: Java + git + fontconfig.
+# Xuất fact jenkins_java_changed (Java vừa cài / đổi) để controller biết cần restart.
+
+# ---------------- Online: apt ----------------
+- name: Java, git, fontconfig (apt)
+  ansible.builtin.apt:
+    name: ["{{ jenkins_java_package }}", git, fontconfig]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: jenkins_install_source == 'online'
+  register: java_apt
+
+# ---------------- Offline: JRE từ bundle ----------------
+- name: Java from bundle (offline)
+  when: jenkins_install_source == 'offline'
+  vars:
+    arch: "{{ {'x86_64': 'x64', 'aarch64': 'aarch64'}[ansible_facts.architecture] | default(ansible_facts.architecture) }}"
+    jre_file: "{{ jenkins_bundle.java[arch] | default('') }}"
+  block:
+    - name: Bundle has a JRE for this CPU
+      ansible.builtin.assert:
+        that: jre_file | length > 0
+        fail_msg: "bundle/ không có JRE cho {{ arch }} — thêm '{{ arch }}' vào jenkins_bundle_arches rồi chạy lại bundle.yml"
+        quiet: true
+
+    - name: Installed JRE version marker
+      ansible.builtin.slurp:
+        src: "{{ jenkins_offline_java_home }}/.bundle"
+      register: jre_marker
+      failed_when: false
+
+    # Marker ghi tên file JRE đã giải nén; khác bundle → giải nén lại vào thư mục sạch
+    - name: Unpack JRE
+      when: (jre_marker.content | default('') | b64decode | trim) != jre_file
+      block:
+        - name: Clean JRE dir
+          ansible.builtin.file:
+            path: "{{ jenkins_offline_java_home }}"
+            state: "{{ item }}"
+            mode: "0755"
+          loop: [absent, directory]
+
+        - name: Unpack
+          ansible.builtin.unarchive:
+            src: "{{ jenkins_bundle_dir }}/{{ jre_file }}"
+            dest: "{{ jenkins_offline_java_home }}"
+            extra_opts: [--strip-components=1]
+          register: java_unpack
+
+        - name: Write marker
+          ansible.builtin.copy:
+            dest: "{{ jenkins_offline_java_home }}/.bundle"
+            content: "{{ jre_file }}\n"
+            mode: "0644"
+
+    # git / fontconfig không có trong bundle. VM offline thường có mirror nội bộ → thử package manager;
+    # không được thì cảnh báo ở đây. Controller thiếu fontconfig sẽ bị chặn ở install.yml (Jenkins không boot được).
+    # Chỉ gọi package manager khi thiếu, và giới hạn thời gian: VM không có mirror thì dnf/apt có thể treo rất lâu.
+    - name: git / fc-list present?
+      ansible.builtin.shell: command -v git && command -v fc-list
+      register: offline_tools
+      changed_when: false
+      failed_when: false
+
+    - name: git, fontconfig from local package mirror (best effort)
+      ansible.builtin.package:
+        name: [git, fontconfig]
+        state: present
+      when: offline_tools.rc != 0
+      timeout: 120
+      register: offline_pkgs
+      ignore_errors: true
+
+    - name: Warn if git / fontconfig is missing
+      ansible.builtin.debug:
+        msg: "CẢNH BÁO: không cài được git/fontconfig (không có mirror?). Job checkout git trên host này sẽ lỗi — cài tay từ mirror nội bộ."
+      when: offline_pkgs is failed
+
+- name: Java changed? (controller dùng để quyết định restart)
+  ansible.builtin.set_fact:
+    jenkins_java_changed: "{{ java_apt is changed or java_unpack is changed }}"

@@ -1,13 +1,8 @@
-# Agent: Java, user jenkins, nhận public key của controller. Controller SSH vào bằng user jenkins.
-- name: Java
+# Agent (play 3): Java + git, user jenkins, nhận public key của controller.
+# Controller SSH vào bằng user jenkins (IP + host key agent do configure.yml tự đọc ở play 4).
+- name: Java, git
   ansible.builtin.include_role:
-    name: java_runtime
-
-- name: git (online)
-  ansible.builtin.apt:
-    name: git
-    state: present
-  when: jenkins_install_source == 'online'
+    name: jenkins_common
 
 - name: User jenkins
   ansible.builtin.user:
@@ -28,13 +23,3 @@
     user: jenkins
     key: "{{ hostvars[groups['jenkins_controller'][0]].jenkins_controller_pubkey }}"
     exclusive: true
-
-- name: Read SSH host key
-  ansible.builtin.slurp:
-    src: /etc/ssh/ssh_host_ed25519_key.pub
-  register: hostkey
-
-# jenkins_java_bin (từ java_runtime) và jenkins_agent_hostkey được controller đọc qua hostvars ở play 4
-- name: Expose host key to controller (hostvars → play 4)
-  ansible.builtin.set_fact:
-    jenkins_agent_hostkey: "{{ (hostkey.content | b64decode).split()[0:2] | join(' ') }}"

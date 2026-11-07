@@ -1,4 +1,0 @@
-# Biến suy ra tự động — không cần sửa.
-
-# Nội dung bundle/manifest.json (do bundle.yml sinh). Chỉ dùng ở chế độ offline; chưa có bundle → {}.
-jenkins_bundle: "{{ lookup('ansible.builtin.file', jenkins_bundle_dir ~ '/manifest.json', errors='ignore') | default('{}', true) | from_json }}"

@@ -1,0 +1,9 @@
+# Không restart ngay: chỉ đánh dấu trên đĩa. configure.yml (play 4) restart và xóa dấu.
+# Play 2 bật force_handlers nên dấu vẫn được ghi kể cả khi task sau đó lỗi.
+- name: Restart pending
+  ansible.builtin.file:
+    path: "{{ jenkins_restart_marker }}"
+    state: touch
+    mode: "0644"
+    modification_time: preserve
+    access_time: preserve

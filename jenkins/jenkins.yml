@@ -1,17 +1,5 @@
-# Cài Jenkins: standalone hoặc controller + agent, tùy group [jenkins_agents] trong inventory.
-# Nguồn cài: jenkins_install_source = online | offline (group_vars/all/settings.yml).
-#
-# Luồng 4 play (vì sao controller chạy 2 lần: JCasC cần thông tin của agent):
-#   1. Prepare     — mọi host: chờ SSH, facts, cloud-init, kiểm tra điều kiện
-#   2. Controller  — role jenkins (main.yml): Java, Jenkins, plugin, SSH key
-#   3. Agents      — role jenkins_agent: Java, user jenkins, nhận public key của controller
-#   4. Controller  — role jenkins (casc.yml): known_hosts, JCasC, restart/reload, kiểm tra agent online
-#
-# Fact truyền giữa các play (đọc qua hostvars):
-#   controller → agent : jenkins_controller_pubkey   (play 2 → play 3)
-#   agent → controller : jenkins_agent_hostkey       (play 3 → play 4)
-#                        jenkins_java_bin            (đường dẫn java trên agent, cho JCasC)
-#   controller nội bộ  : jenkins_restart_needed      (play 2 → play 4)
+# Cài Jenkins: standalone hoặc controller + agent (tùy [jenkins_agents]), nguồn online | offline.
+# 4 play — controller chạy 2 lần vì JCasC cần agent đã sẵn sàng. Chi tiết: README.md "Luồng chạy".
 - name: Prepare all hosts
   hosts: jenkins_all
   become: true
@@ -58,8 +46,9 @@
   hosts: jenkins_controller
   become: true
   gather_facts: false
+  force_handlers: true                      # task sau lỗi vẫn ghi dấu "cần restart"
   roles:
-    - jenkins
+    - jenkins_controller
 
 - name: Set up Jenkins agents               # play 3
   hosts: jenkins_agents
@@ -73,7 +62,7 @@
   become: true
   gather_facts: false
   tasks:
-    - name: Apply configuration as code
+    - name: Configure controller
       ansible.builtin.include_role:
-        name: jenkins
-        tasks_from: casc
+        name: jenkins_controller
+        tasks_from: configure

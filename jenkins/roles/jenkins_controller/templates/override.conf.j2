@@ -1,0 +1,6 @@
+# {{ ansible_managed }}
+[Service]
+Environment="JENKINS_PORT={{ jenkins_http_port }}"
+Environment="CASC_JENKINS_CONFIG={{ jenkins_casc_dir }}"
+Environment="CASC_RELOAD_TOKEN={{ jenkins_casc_reload_token }}"
+Environment="JAVA_OPTS=-Djava.awt.headless=true -Djenkins.install.runSetupWizard=false{{ ' -Dhudson.model.UpdateCenter.never=true' if jenkins_install_source == 'offline' else '' }}"

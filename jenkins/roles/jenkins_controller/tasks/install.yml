@@ -1,0 +1,101 @@
+# Cài Jenkins: online → package apt (có sẵn systemd unit); offline → jenkins.war + unit tự viết.
+# Sau đó cả hai dùng chung drop-in systemd (port, JCasC, bỏ setup wizard).
+
+# ---------------- Online: apt repo pkg.jenkins.io (Debian/Ubuntu) ----------------
+- name: Install from apt (online)
+  when: jenkins_install_source == 'online'
+  block:
+    - name: python3-debian (cần cho deb822_repository)
+      ansible.builtin.apt:
+        name: python3-debian
+        state: present
+
+    - name: Jenkins apt repo
+      ansible.builtin.deb822_repository:
+        name: jenkins
+        types: deb
+        uris: "{{ jenkins_repo_url }}"
+        suites: binary/
+        signed_by: "{{ jenkins_key_url }}"
+        state: present
+
+    - name: Jenkins package
+      ansible.builtin.apt:
+        name: jenkins
+        state: "{{ 'latest' if jenkins_upgrade | bool else 'present' }}"
+        update_cache: true
+      notify: Restart pending
+
+# ---------------- Offline: jenkins.war từ bundle (mọi distro systemd) ----------------
+- name: Install from bundle (offline)
+  when: jenkins_install_source == 'offline'
+  block:
+    # Thiếu fontconfig → Jenkins không boot được (AWTProblem "Fontconfig head is null").
+    # Bundle không chứa gói OS; jenkins_common đã thử cài từ mirror nội bộ — vẫn thiếu thì dừng ở đây.
+    - name: Fonts available? (fc-list)
+      ansible.builtin.command: fc-list
+      register: fc_list
+      changed_when: false
+      failed_when: false
+
+    - name: Controller needs fontconfig + fonts
+      ansible.builtin.assert:
+        that: fc_list.rc == 0 and fc_list.stdout | length > 0
+        fail_msg: >-
+          Controller thiếu fontconfig/font → Jenkins sẽ không khởi động được. Cài gói 'fontconfig'
+          (kéo theo font) từ mirror nội bộ / ISO, ví dụ `apt install fontconfig` hoặc `dnf install fontconfig`, rồi chạy lại.
+        quiet: true
+
+    - name: Group jenkins
+      ansible.builtin.group:
+        name: jenkins
+        system: true
+
+    - name: User jenkins
+      ansible.builtin.user:
+        name: jenkins
+        group: jenkins
+        system: true
+        home: "{{ jenkins_home }}"
+        shell: /bin/bash
+
+    - name: Dirs
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.owner }}"
+        mode: "0755"
+      loop:
+        - { path: "{{ jenkins_war | dirname }}", owner: root }
+        - { path: "{{ jenkins_home }}", owner: jenkins }
+        - { path: /var/cache/jenkins, owner: jenkins }
+
+    - name: jenkins.war
+      ansible.builtin.copy:
+        src: "{{ jenkins_bundle_dir }}/{{ jenkins_bundle.war }}"
+        dest: "{{ jenkins_war }}"
+        mode: "0644"
+      notify: Restart pending
+
+    - name: Systemd unit
+      ansible.builtin.template:
+        src: jenkins.service.j2
+        dest: /etc/systemd/system/jenkins.service
+        mode: "0644"
+      notify: Restart pending
+
+# ---------------- Chung: drop-in systemd ----------------
+- name: Systemd drop-in dir
+  ansible.builtin.file:
+    path: /etc/systemd/system/jenkins.service.d
+    state: directory
+    mode: "0755"
+
+- name: Systemd drop-in (port, JCasC, bỏ setup wizard)
+  ansible.builtin.template:
+    src: override.conf.j2
+    dest: /etc/systemd/system/jenkins.service.d/override.conf
+    mode: "0600"
+  no_log: true
+  notify: Restart pending

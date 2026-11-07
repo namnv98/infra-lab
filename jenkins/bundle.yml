@@ -9,6 +9,7 @@
     bd: "{{ jenkins_bundle_dir }}"
     war_name: "jenkins-{{ jenkins_version }}.war"
     pm_jar: "{{ bd }}/jenkins-plugin-manager-{{ jenkins_plugin_manager_version }}.jar"
+    plugins_stamp: "{{ jenkins_version }}\n{{ jenkins_plugins | sort | join('\n') }}"
   tasks:
     - name: Local Java is required (plugin manager)
       ansible.builtin.command: java -version
@@ -46,26 +47,19 @@
 
     - name: Download plugin manager
       ansible.builtin.get_url:
-        url: "https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download/{{ jenkins_plugin_manager_version }}/jenkins-plugin-manager-{{ jenkins_plugin_manager_version }}.jar"
-        checksum: "sha256:https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download/{{ jenkins_plugin_manager_version }}/jenkins-plugin-manager-{{ jenkins_plugin_manager_version }}.jar.sha256"
+        url: "{{ jenkins_plugin_manager_url }}"
+        checksum: "sha256:{{ jenkins_plugin_manager_url }}.sha256"
         dest: "{{ pm_jar }}"
         mode: "0644"
 
-    # Danh sách plugin hoặc version Jenkins đổi → resolve lại từ đầu (tránh sót plugin cũ / sai dependency)
-    - name: Plugin list stamp
-      ansible.builtin.copy:
-        dest: "{{ bd }}/plugins.stamp"
-        content: "{{ jenkins_version }}\n{{ jenkins_plugins | sort | join('\n') }}\n"
-        mode: "0644"
-      register: stamp
-
-    - name: Plugins tarball present?
-      ansible.builtin.stat:
-        path: "{{ bd }}/plugins.tar.gz"
-      register: plugins_tgz
+    # Danh sách plugin hoặc version Jenkins đổi → resolve lại từ đầu (tránh sót plugin cũ / sai dependency).
+    # Stamp chỉ ghi SAU khi đóng gói xong → lần trước lỗi giữa chừng thì lần này vẫn resolve lại.
+    - name: Plugins up to date?
+      ansible.builtin.set_fact:
+        plugins_fresh: "{{ (lookup('ansible.builtin.file', bd ~ '/plugins.stamp', errors='ignore') | default('', true)) == plugins_stamp and (bd ~ '/plugins.tar.gz') is file }}"
 
     - name: Resolve + download plugins (with dependencies)
-      when: stamp is changed or not plugins_tgz.stat.exists
+      when: not plugins_fresh
       block:
         - name: Clean plugin dir
           ansible.builtin.file:
@@ -81,12 +75,20 @@
             --plugin-download-directory {{ bd }}/plugins
             --plugins {{ jenkins_plugins | join(' ') }}
           register: pm
+          changed_when: true
           retries: 3
           delay: 10
           until: pm is succeeded
 
         - name: Pack plugins
           ansible.builtin.command: tar -czf {{ bd }}/plugins.tar.gz -C {{ bd }}/plugins .
+          changed_when: true
+
+        - name: Plugin list stamp
+          ansible.builtin.copy:
+            dest: "{{ bd }}/plugins.stamp"
+            content: "{{ plugins_stamp }}"
+            mode: "0644"
 
     - name: Count plugins
       ansible.builtin.find:

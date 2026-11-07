@@ -1,0 +1,53 @@
+# {{ ansible_managed }}
+{% set agents = groups['jenkins_agents'] | default([]) %}
+jenkins:
+  systemMessage: "Managed by Ansible (JCasC)"
+  numExecutors: {{ 0 if agents else jenkins_controller_executors }}
+  mode: {{ 'EXCLUSIVE' if agents else 'NORMAL' }}
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "{{ jenkins_admin_user }}"
+          password: "${readFile:/etc/jenkins/secrets/admin_password}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+{% if agents %}
+  nodes:
+{% for a in agents %}
+    - permanent:
+        name: "{{ a }}"
+        remoteFS: "{{ hostvars[a].jenkins_agent_home }}/agent"
+        numExecutors: {{ hostvars[a].jenkins_agent_executors }}
+        labelString: "{{ hostvars[a].jenkins_agent_labels }}"
+        retentionStrategy: "always"
+        launcher:
+          ssh:
+            host: "{{ hostvars[a].jenkins_agent_address }}"
+            port: 22
+            credentialsId: jenkins-agent-ssh
+            javaPath: "{{ hostvars[a].jenkins_java_bin }}"
+            sshHostKeyVerificationStrategy:
+              knownHostsFileKeyVerificationStrategy: {}
+{% endfor %}
+{% else %}
+  nodes: []
+{% endif %}
+
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - basicSSHUserPrivateKey:
+              scope: SYSTEM
+              id: jenkins-agent-ssh
+              username: jenkins
+              description: "Controller → agents (managed by Ansible)"
+              privateKeySource:
+                directEntry:
+                  privateKey: "${readFile:{{ jenkins_home }}/.ssh/id_ed25519}"
+
+unclassified:
+  location:
+    url: "{{ jenkins_url }}"

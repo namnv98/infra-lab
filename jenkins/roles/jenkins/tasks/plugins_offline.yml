@@ -1,0 +1,17 @@
+# Offline: giải nén plugins.tar.gz từ bundle (chỉ khi archive đổi)
+- name: Copy plugins archive
+  ansible.builtin.copy:
+    src: "{{ jenkins_bundle_dir }}/{{ jenkins_bundle.plugins_archive }}"
+    dest: /var/cache/jenkins/plugins.tar.gz
+    mode: "0644"
+  register: plugins_archive
+
+- name: Unpack plugins
+  ansible.builtin.unarchive:
+    src: /var/cache/jenkins/plugins.tar.gz
+    dest: "{{ jenkins_home }}/plugins"
+    remote_src: true
+    owner: jenkins
+    group: jenkins
+  when: plugins_archive is changed
+  register: plugins_offline

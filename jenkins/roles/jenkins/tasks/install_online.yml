@@ -1,0 +1,20 @@
+# Online: Jenkins từ apt repo pkg.jenkins.io (Debian/Ubuntu)
+- name: Prerequisites
+  ansible.builtin.apt:
+    name: [fontconfig, git]
+    state: present
+
+- name: Jenkins apt repo
+  ansible.builtin.deb822_repository:
+    name: jenkins
+    types: deb
+    uris: "{{ jenkins_repo_url }}"
+    suites: binary/
+    signed_by: "{{ jenkins_key_url }}"
+    state: present
+
+- name: Jenkins package
+  ansible.builtin.apt:
+    name: jenkins
+    state: present
+    update_cache: true

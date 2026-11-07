@@ -1,0 +1,114 @@
+# Tạo bundle cho chế độ offline. Chạy trên máy CÓ internet (cần Java 11+ để resolve plugin):
+#   ansible-playbook bundle.yml
+# Kết quả: bundle/ (JRE, jenkins.war, plugins.tar.gz, manifest.json) → mang sang máy chạy Ansible.
+- name: Build offline bundle
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    bd: "{{ jenkins_bundle_dir }}"
+    war_name: "jenkins-{{ jenkins_version }}.war"
+    pm_jar: "{{ bd }}/jenkins-plugin-manager-{{ jenkins_plugin_manager_version }}.jar"
+  tasks:
+    - name: Local Java is required (plugin manager)
+      ansible.builtin.command: java -version
+      changed_when: false
+
+    - name: Bundle dirs
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [ "{{ bd }}", "{{ bd }}/plugins" ]
+
+    - name: JRE metadata (Adoptium Temurin)
+      ansible.builtin.uri:
+        url: "https://api.adoptium.net/v3/assets/latest/{{ jenkins_java_major }}/hotspot?architecture={{ item }}&image_type=jre&os=linux&vendor=eclipse"
+      loop: "{{ jenkins_bundle_arches }}"
+      register: jre_meta
+
+    - name: Download JRE
+      ansible.builtin.get_url:
+        url: "{{ item.json[0].binary.package.link }}"
+        dest: "{{ bd }}/{{ item.json[0].binary.package.name }}"
+        checksum: "sha256:{{ item.json[0].binary.package.checksum }}"
+        mode: "0644"
+      loop: "{{ jre_meta.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Download jenkins.war
+      ansible.builtin.get_url:
+        url: "https://get.jenkins.io/war-stable/{{ jenkins_version }}/jenkins.war"
+        dest: "{{ bd }}/{{ war_name }}"
+        checksum: "sha256:https://get.jenkins.io/war-stable/{{ jenkins_version }}/jenkins.war.sha256"
+        mode: "0644"
+
+    - name: Download plugin manager
+      ansible.builtin.get_url:
+        url: "https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download/{{ jenkins_plugin_manager_version }}/jenkins-plugin-manager-{{ jenkins_plugin_manager_version }}.jar"
+        checksum: "sha256:https://github.com/jenkinsci/plugin-installation-manager-tool/releases/download/{{ jenkins_plugin_manager_version }}/jenkins-plugin-manager-{{ jenkins_plugin_manager_version }}.jar.sha256"
+        dest: "{{ pm_jar }}"
+        mode: "0644"
+
+    # Danh sách plugin hoặc version Jenkins đổi → resolve lại từ đầu (tránh sót plugin cũ / sai dependency)
+    - name: Plugin list stamp
+      ansible.builtin.copy:
+        dest: "{{ bd }}/plugins.stamp"
+        content: "{{ jenkins_version }}\n{{ jenkins_plugins | sort | join('\n') }}\n"
+        mode: "0644"
+      register: stamp
+
+    - name: Plugins tarball present?
+      ansible.builtin.stat:
+        path: "{{ bd }}/plugins.tar.gz"
+      register: plugins_tgz
+
+    - name: Resolve + download plugins (with dependencies)
+      when: stamp is changed or not plugins_tgz.stat.exists
+      block:
+        - name: Clean plugin dir
+          ansible.builtin.file:
+            path: "{{ bd }}/plugins"
+            state: "{{ item }}"
+            mode: "0755"
+          loop: [absent, directory]
+
+        - name: Run plugin manager
+          ansible.builtin.command: >
+            java -jar {{ pm_jar }}
+            --war {{ bd }}/{{ war_name }}
+            --plugin-download-directory {{ bd }}/plugins
+            --plugins {{ jenkins_plugins | join(' ') }}
+          register: pm
+          retries: 3
+          delay: 10
+          until: pm is succeeded
+
+        - name: Pack plugins
+          ansible.builtin.command: tar -czf {{ bd }}/plugins.tar.gz -C {{ bd }}/plugins .
+
+    - name: Count plugins
+      ansible.builtin.find:
+        paths: "{{ bd }}/plugins"
+        patterns: "*.jpi,*.hpi"
+      register: plugin_files
+
+    - name: Write manifest
+      ansible.builtin.copy:
+        dest: "{{ bd }}/manifest.json"
+        mode: "0644"
+        content: "{{ manifest | to_nice_json }}\n"
+      vars:
+        manifest:
+          jenkins_version: "{{ jenkins_version }}"
+          war: "{{ war_name }}"
+          java_major: "{{ jenkins_java_major }}"
+          java: "{{ dict(jre_meta.results | map(attribute='item') | zip(jre_meta.results | map(attribute='json') | map('first') | map(attribute='binary') | map(attribute='package') | map(attribute='name'))) }}"
+          plugins_requested: "{{ jenkins_plugins | sort }}"
+          plugins_count: "{{ plugin_files.matched }}"
+          plugins_archive: plugins.tar.gz
+
+    - name: Bundle summary
+      ansible.builtin.debug:
+        msg: "Bundle OK: {{ bd }} — Jenkins {{ jenkins_version }}, JRE {{ jenkins_bundle_arches | join('/') }}, {{ plugin_files.matched }} plugins"

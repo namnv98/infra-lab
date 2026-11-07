@@ -1,0 +1,21 @@
+# {{ ansible_managed }} — unit cho chế độ offline (chạy jenkins.war trực tiếp)
+[Unit]
+Description=Jenkins Continuous Integration Server
+Requires=network.target
+After=network.target
+
+[Service]
+Type=simple
+User=jenkins
+Group=jenkins
+Environment="JENKINS_HOME={{ jenkins_home }}"
+Environment="JENKINS_PORT={{ jenkins_http_port }}"
+WorkingDirectory={{ jenkins_home }}
+ExecStart={{ jenkins_java_bin }} $JAVA_OPTS -jar {{ jenkins_war }} --webroot=/var/cache/jenkins/war --httpPort=${JENKINS_PORT}
+Restart=on-failure
+RestartSec=5
+SuccessExitStatus=143
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

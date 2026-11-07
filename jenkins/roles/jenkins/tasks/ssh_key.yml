@@ -1,0 +1,23 @@
+# SSH key controller dùng để vào agent (sinh 1 lần, giữ nguyên các lần sau)
+- name: Controller SSH dir
+  ansible.builtin.file:
+    path: "{{ jenkins_home }}/.ssh"
+    state: directory
+    owner: jenkins
+    group: jenkins
+    mode: "0700"
+
+- name: Controller SSH key
+  ansible.builtin.command: ssh-keygen -t ed25519 -N "" -C jenkins-controller -f {{ jenkins_home }}/.ssh/id_ed25519
+  args:
+    creates: "{{ jenkins_home }}/.ssh/id_ed25519"
+  become_user: jenkins
+
+- name: Read controller public key
+  ansible.builtin.slurp:
+    src: "{{ jenkins_home }}/.ssh/id_ed25519.pub"
+  register: controller_pubkey
+
+- name: Expose public key to agents (hostvars → play 3)
+  ansible.builtin.set_fact:
+    jenkins_controller_pubkey: "{{ controller_pubkey.content | b64decode | trim }}"

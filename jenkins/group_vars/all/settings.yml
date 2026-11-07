@@ -1,0 +1,42 @@
+# Biến người dùng chỉnh. Biến suy ra (không cần sửa) ở derived.yml.
+
+# --- Nguồn cài ---
+#   online : VM tự tải từ internet (apt, pkg.jenkins.io, update center). Chỉ Debian/Ubuntu.
+#   offline: VM không cần internet. Chạy `ansible-playbook bundle.yml` trên máy có internet để tải
+#            mọi thứ vào bundle/, mang thư mục đó sang máy chạy Ansible, rồi ./install.sh đẩy file
+#            lên VM qua SSH. Chạy được trên mọi distro Linux dùng systemd.
+jenkins_install_source: online
+jenkins_bundle_dir: "{{ playbook_dir }}/bundle"
+jenkins_bundle_arches: [x64]          # x64 | aarch64 — kiến trúc CPU của các VM
+
+# --- Java (controller và agent phải cùng major) ---
+jenkins_java_major: 21
+jenkins_java_package: openjdk-21-jre-headless          # online
+jenkins_offline_java_home: /opt/java/jre-{{ jenkins_java_major }}   # offline
+
+# --- Jenkins ---
+jenkins_version: 2.580.2              # offline: version jenkins.war đóng vào bundle (online: bản LTS mới nhất từ apt)
+jenkins_http_port: 8080
+jenkins_url: "http://{{ hostvars[groups['jenkins_controller'][0]].ansible_host }}:{{ jenkins_http_port }}/"
+jenkins_admin_user: admin
+# Tự sinh lần đầu, lưu ở credentials/ (đã gitignore). Muốn tự đặt: ghi đè (nên dùng ansible-vault).
+jenkins_admin_password: "{{ lookup('ansible.builtin.password', playbook_dir ~ '/credentials/jenkins_admin_password', length=24, chars=['ascii_letters', 'digits']) }}"
+jenkins_casc_reload_token: "{{ lookup('ansible.builtin.password', playbook_dir ~ '/credentials/jenkins_casc_reload_token', length=32, chars=['ascii_letters', 'digits']) }}"
+jenkins_controller_executors: 2       # chỉ dùng ở chế độ standalone; có agent thì = 0
+
+jenkins_plugin_manager_version: 2.16.0
+jenkins_plugins:
+  - configuration-as-code
+  - ssh-slaves
+  - git
+  - workflow-aggregator
+  - pipeline-graph-view
+  - timestamper
+
+# --- Agent (ghi đè được theo từng host trong inventory) ---
+jenkins_agent_executors: 2
+jenkins_agent_labels: linux
+jenkins_agent_home: /home/jenkins
+# Địa chỉ controller dùng để SSH vào agent. Mặc định IP nội bộ của agent (cùng VPC/LAN);
+# controller và agent khác mạng → đặt jenkins_agent_address=<IP public> cho host đó.
+jenkins_agent_address: "{{ ansible_default_ipv4.address }}"

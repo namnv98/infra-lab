@@ -1,0 +1,94 @@
+# --- Mật khẩu admin: lần đầu Nexus sinh admin.password ngẫu nhiên → đổi sang mật khẩu của mình ---
+- name: Initial admin password file
+  ansible.builtin.stat:
+    path: "{{ nexus_data }}/admin.password"
+  register: initial_pw_file
+
+- name: Set admin password (first run)
+  when: initial_pw_file.stat.exists
+  block:
+    - name: Read initial password
+      ansible.builtin.slurp:
+        src: "{{ nexus_data }}/admin.password"
+      register: initial_pw
+
+    - name: Change admin password
+      ansible.builtin.uri:
+        url: "{{ nexus_api }}/security/users/admin/change-password"
+        method: PUT
+        url_username: admin
+        url_password: "{{ initial_pw.content | b64decode | trim }}"
+        force_basic_auth: true
+        headers: { Content-Type: text/plain }
+        body: "{{ nexus_admin_password }}"
+        status_code: 204
+      no_log: true
+
+    - name: Remove initial password file
+      ansible.builtin.file:
+        path: "{{ nexus_data }}/admin.password"
+        state: absent
+
+- name: Admin login works
+  ansible.builtin.uri:
+    url: "{{ nexus_api }}/status/check"
+    url_username: admin
+    url_password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+  register: auth
+  failed_when: auth.status != 200
+  no_log: true
+
+# --- EULA (Community Edition) ---
+- name: EULA status
+  ansible.builtin.uri:
+    url: "{{ nexus_api }}/system/eula"
+    url_username: admin
+    url_password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+  register: eula
+  no_log: true
+
+- name: Accept EULA
+  ansible.builtin.uri:
+    url: "{{ nexus_api }}/system/eula"
+    method: POST
+    url_username: admin
+    url_password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body: { accepted: true, disclaimer: "{{ eula.json.disclaimer }}" }
+    status_code: [200, 204]
+  when: nexus_accept_eula and not eula.json.accepted
+  changed_when: true
+  no_log: true
+
+# --- Anonymous access ---
+- name: Anonymous access status
+  ansible.builtin.uri:
+    url: "{{ nexus_api }}/security/anonymous"
+    url_username: admin
+    url_password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+  register: anon
+  no_log: true
+
+- name: Set anonymous access
+  ansible.builtin.uri:
+    url: "{{ nexus_api }}/security/anonymous"
+    method: PUT
+    url_username: admin
+    url_password: "{{ nexus_admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body: "{{ anon.json | combine({'enabled': nexus_anonymous_access}) }}"
+  when: anon.json.enabled != nexus_anonymous_access
+  changed_when: true
+  no_log: true
+
+- name: Show access info
+  ansible.builtin.debug:
+    msg:
+      - "Nexus {{ nexus_version }} ({{ nexus_install_source }}): {{ nexus_url }}"
+      - "User: admin — password: credentials/nexus_admin_password (trên máy chạy Ansible)"
+      - "Anonymous access: {{ nexus_anonymous_access }}"

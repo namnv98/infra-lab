@@ -1,0 +1,17 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Nexus Repository Manager
+After=network.target
+
+[Service]
+Type=forking
+User={{ nexus_user }}
+Group={{ nexus_user }}
+LimitNOFILE=65536
+ExecStart={{ nexus_link }}/bin/nexus start
+ExecStop={{ nexus_link }}/bin/nexus stop
+Restart=on-abort
+TimeoutSec=600
+
+[Install]
+WantedBy=multi-user.target

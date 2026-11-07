@@ -1,0 +1,135 @@
+- name: Wait for cloud-init
+  ansible.builtin.command: cloud-init status --wait
+  changed_when: false
+  failed_when: false
+
+- name: Group nexus
+  ansible.builtin.group:
+    name: "{{ nexus_user }}"
+    system: true
+
+- name: User nexus
+  ansible.builtin.user:
+    name: "{{ nexus_user }}"
+    group: "{{ nexus_user }}"
+    system: true
+    home: "{{ nexus_data }}"
+    create_home: false
+    shell: /bin/bash
+
+- name: Data dirs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ nexus_user }}"
+    group: "{{ nexus_user }}"
+    mode: "0750"
+  loop: [ "{{ nexus_data | dirname }}", "{{ nexus_data }}", "{{ nexus_data }}/etc" ]
+
+# ---------------- Tarball ----------------
+- name: Installed?
+  ansible.builtin.stat:
+    path: "{{ nexus_home }}/bin/nexus"
+  register: installed
+
+- name: Fetch + unpack Nexus {{ nexus_version }}
+  when: not installed.stat.exists
+  block:
+    - name: Download tarball (online)
+      ansible.builtin.get_url:
+        url: "{{ nexus_download_url }}"
+        dest: "/tmp/{{ nexus_tarball }}"
+        checksum: "sha256:{{ nexus_download_url }}.sha256"
+        mode: "0644"
+        timeout: 600
+      when: nexus_install_source == 'online'
+
+    - name: Copy tarball from bundle (offline)
+      ansible.builtin.copy:
+        src: "{{ nexus_bundle_dir }}/{{ nexus_tarball }}"
+        dest: "/tmp/{{ nexus_tarball }}"
+        mode: "0644"
+      when: nexus_install_source == 'offline'
+
+    # Chỉ lấy thư mục chương trình; sonatype-work trong tarball bỏ qua (dữ liệu nằm ở nexus_data)
+    - name: Unpack
+      ansible.builtin.unarchive:
+        src: "/tmp/{{ nexus_tarball }}"
+        dest: "{{ nexus_base }}"
+        remote_src: true
+        include: [ "nexus-{{ nexus_version }}" ]
+        owner: root     # chương trình thuộc root; chỉ data dir là của user nexus
+        group: root
+
+    - name: Remove tarball
+      ansible.builtin.file:
+        path: "/tmp/{{ nexus_tarball }}"
+        state: absent
+
+- name: Symlink {{ nexus_link }} → {{ nexus_home }}
+  ansible.builtin.file:
+    src: "{{ nexus_home }}"
+    dest: "{{ nexus_link }}"
+    state: link
+  register: link
+
+# ---------------- Config ----------------
+# Chỉ sửa heap + đường dẫn data trên file vmoptions đi kèm tarball → nâng version vẫn giữ các option mới của Sonatype
+- name: JVM heap
+  ansible.builtin.lineinfile:
+    path: "{{ nexus_home }}/bin/nexus.vmoptions"
+    regexp: "^{{ item }}"
+    line: "{{ item }}{{ nexus_heap }}"
+  loop: [-Xms, -Xmx]
+  register: vm_heap
+
+- name: JVM data dir (../sonatype-work/nexus3 → {{ nexus_data }})
+  ansible.builtin.replace:
+    path: "{{ nexus_home }}/bin/nexus.vmoptions"
+    regexp: '\.\./sonatype-work/nexus3'
+    replace: "{{ nexus_data }}"
+  register: vm_data
+
+- name: nexus.properties (port)
+  ansible.builtin.copy:
+    dest: "{{ nexus_data }}/etc/nexus.properties"
+    owner: "{{ nexus_user }}"
+    group: "{{ nexus_user }}"
+    mode: "0640"
+    content: |
+      # Managed by Ansible
+      application-port={{ nexus_http_port }}
+      application-host=0.0.0.0
+  register: props
+
+- name: Systemd unit
+  ansible.builtin.template:
+    src: nexus.service.j2
+    dest: /etc/systemd/system/nexus.service
+    mode: "0644"
+  register: unit
+
+- name: Restart Nexus (version / config changed)
+  ansible.builtin.systemd:
+    name: nexus
+    state: restarted
+    enabled: true
+    daemon_reload: true
+  when: link is changed or vm_heap is changed or vm_data is changed or props is changed or unit is changed
+
+- name: Ensure Nexus is running
+  ansible.builtin.systemd:
+    name: nexus
+    state: started
+    enabled: true
+
+- name: Wait for Nexus API (khởi động lần đầu mất 1–3 phút)
+  ansible.builtin.uri:
+    url: "{{ nexus_api }}/status/writable"
+  register: st
+  until: st.status == 200
+  retries: 60
+  delay: 5
+
+- name: Configure (admin, EULA, anonymous)
+  ansible.builtin.include_tasks: configure.yml

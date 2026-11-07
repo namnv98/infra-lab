@@ -1,0 +1,22 @@
+# --- Nguồn cài ---
+#   online : VM tự tải tarball từ download.sonatype.com
+#   offline: VM không cần internet. Chạy `ansible-playbook bundle.yml` trên máy có internet,
+#            mang bundle/ sang máy chạy Ansible, rồi ./install.sh đẩy tarball lên VM qua SSH.
+# Tarball Nexus đã kèm JDK → không cần cài Java, chạy được trên mọi distro dùng systemd.
+nexus_install_source: online
+nexus_bundle_dir: "{{ playbook_dir }}/bundle"
+
+nexus_version: 3.98.1-01
+nexus_tarball: "nexus-{{ nexus_version }}-linux-x86_64.tar.gz"
+nexus_download_url: "https://download.sonatype.com/nexus/3/{{ nexus_tarball }}"
+
+# --- Runtime ---
+nexus_http_port: 8081
+nexus_heap: 2703m                      # mặc định của Sonatype; VM 8GB RAM dùng được
+nexus_url: "http://{{ hostvars[groups['nexus'][0]].ansible_host }}:{{ nexus_http_port }}/"
+
+# --- Bảo mật ---
+# Mật khẩu admin tự sinh lần đầu, lưu ở credentials/ (đã gitignore). Muốn tự đặt: ghi đè (nên dùng ansible-vault).
+nexus_admin_password: "{{ lookup('ansible.builtin.password', playbook_dir ~ '/credentials/nexus_admin_password', length=24, chars=['ascii_letters', 'digits']) }}"
+nexus_anonymous_access: false          # true: cho phép kéo artifact không cần login
+nexus_accept_eula: true                # Community Edition bắt buộc chấp nhận EULA mới dùng được

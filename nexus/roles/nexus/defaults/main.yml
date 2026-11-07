@@ -1,0 +1,6 @@
+nexus_user: nexus
+nexus_base: /opt
+nexus_home: "{{ nexus_base }}/nexus-{{ nexus_version }}"   # bản đang chạy; /opt/nexus → symlink tới đây
+nexus_link: "{{ nexus_base }}/nexus"
+nexus_data: "{{ nexus_base }}/sonatype-work/nexus3"        # dữ liệu, giữ nguyên khi nâng version
+nexus_api: "http://127.0.0.1:{{ nexus_http_port }}/service/rest/v1"

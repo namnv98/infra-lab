@@ -1,0 +1,27 @@
+# Cài Nexus Repository CE. Nguồn cài: nexus_install_source = online | offline (group_vars/all.yml).
+- name: Install Nexus Repository
+  hosts: nexus
+  become: true
+  gather_facts: false
+  pre_tasks:
+    # VM vừa tạo có thể mở port 22 trước khi nhận SSH key → chờ login được thật
+    - name: Wait until SSH login works
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+    - name: Gather facts
+      ansible.builtin.setup:
+    - name: Requirements
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.service_mgr == 'systemd'
+          - ansible_facts.architecture == 'x86_64'
+        fail_msg: "Cần Linux x86_64 dùng systemd"
+        quiet: true
+    - name: Offline mode needs the tarball in bundle/
+      ansible.builtin.assert:
+        that: (nexus_bundle_dir ~ '/' ~ nexus_tarball) is file
+        fail_msg: "Thiếu bundle/{{ nexus_tarball }} — chạy `ansible-playbook bundle.yml` trên máy có internet"
+        quiet: true
+      when: nexus_install_source == 'offline'
+  roles:
+    - nexus

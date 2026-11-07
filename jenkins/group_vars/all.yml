@@ -43,6 +43,8 @@ jenkins_agent_home: /home/jenkins
 # Địa chỉ controller dùng để SSH vào agent. Mặc định IP nội bộ của agent (cùng VPC/LAN);
 # controller và agent khác mạng → đặt jenkins_agent_address=<IP public> cho host đó.
 jenkins_agent_address: "{{ ansible_facts.default_ipv4.address | default(ansible_host) }}"
+# Port SSH controller dùng để vào agent. Mặc định = port Ansible dùng (ansible_port), không có thì 22.
+jenkins_agent_ssh_port: "{{ ansible_port | default(22) }}"
 
 # ===================== Đường dẫn / biến suy ra — thường không sửa =====================
 jenkins_home: /var/lib/jenkins

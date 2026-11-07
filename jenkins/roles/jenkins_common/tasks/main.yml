@@ -17,6 +17,7 @@
   vars:
     arch: "{{ {'x86_64': 'x64', 'aarch64': 'aarch64'}[ansible_facts.architecture] | default(ansible_facts.architecture) }}"
     jre_file: "{{ jenkins_bundle.java[arch] | default('') }}"
+    jre_dir: "/opt/java/{{ jre_file | regex_replace('\\.tar\\.gz$', '') }}"
   block:
     - name: Bundle has a JRE for this CPU
       ansible.builtin.assert:
@@ -24,35 +25,47 @@
         fail_msg: "bundle/ không có JRE cho {{ arch }} — thêm '{{ arch }}' vào jenkins_bundle_arches rồi chạy lại bundle.yml"
         quiet: true
 
-    - name: Installed JRE version marker
-      ansible.builtin.slurp:
-        src: "{{ jenkins_offline_java_home }}/.bundle"
-      register: jre_marker
-      failed_when: false
+    # Mỗi bản JRE giải nén vào thư mục riêng; jenkins_offline_java_home là symlink trỏ tới bản đang dùng.
+    # Đổi JRE = đổi symlink → JVM đang chạy (controller, agent) không bị xóa file dưới chân.
+    # Bản cũ để lại trong /opt/java (xóa tay khi không còn process nào dùng).
+    - name: JRE version dir
+      ansible.builtin.file:
+        path: "{{ jre_dir }}"
+        state: directory
+        mode: "0755"
 
-    # Marker ghi tên file JRE đã giải nén; khác bundle → giải nén lại vào thư mục sạch
     - name: Unpack JRE
-      when: (jre_marker.content | default('') | b64decode | trim) != jre_file
-      block:
-        - name: Clean JRE dir
-          ansible.builtin.file:
-            path: "{{ jenkins_offline_java_home }}"
-            state: "{{ item }}"
-            mode: "0755"
-          loop: [absent, directory]
+      ansible.builtin.unarchive:
+        src: "{{ jenkins_bundle_dir }}/{{ jre_file }}"
+        dest: "{{ jre_dir }}"
+        extra_opts: [--strip-components=1]
+        creates: "{{ jre_dir }}/bin/java"
 
-        - name: Unpack
-          ansible.builtin.unarchive:
-            src: "{{ jenkins_bundle_dir }}/{{ jre_file }}"
-            dest: "{{ jenkins_offline_java_home }}"
-            extra_opts: [--strip-components=1]
-          register: java_unpack
+    # Bản cài cũ: java home là thư mục thật → đổi tên (giữ nguyên file cho JVM đang chạy) để thay bằng symlink
+    - name: Java home path
+      ansible.builtin.stat:
+        path: "{{ jenkins_offline_java_home }}"
+      register: java_home_stat
 
-        - name: Write marker
-          ansible.builtin.copy:
-            dest: "{{ jenkins_offline_java_home }}/.bundle"
-            content: "{{ jre_file }}\n"
-            mode: "0644"
+    - name: Move legacy JRE dir aside
+      ansible.builtin.command: mv {{ jenkins_offline_java_home }} {{ jenkins_offline_java_home }}.legacy
+      when: java_home_stat.stat.isdir | default(false) and not java_home_stat.stat.islnk
+      changed_when: true
+
+    - name: Point java home to this JRE
+      ansible.builtin.file:
+        src: "{{ jre_dir }}"
+        dest: "{{ jenkins_offline_java_home }}"
+        state: link
+      register: java_unpack
+
+    # Online có /usr/bin/java từ apt; offline thêm vào PATH để job (sh 'java …') chạy giống nhau
+    - name: java on PATH
+      ansible.builtin.file:
+        src: "{{ jenkins_offline_java_home }}/bin/java"
+        dest: /usr/local/bin/java
+        state: link
+        force: true
 
     # git / fontconfig không có trong bundle. VM offline thường có mirror nội bộ → thử package manager;
     # không được thì cảnh báo ở đây. Controller thiếu fontconfig sẽ bị chặn ở install.yml (Jenkins không boot được).

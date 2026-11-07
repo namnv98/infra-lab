@@ -21,18 +21,21 @@
   loop: "{{ agents }}"
   register: agent_hostkeys
 
-- name: Trust agent host keys
-  ansible.builtin.known_hosts:
-    path: "{{ jenkins_home }}/.ssh/known_hosts"
-    name: "{{ address }}"
-    key: "{{ address }} {{ (item.content | b64decode).split()[0:2] | join(' ') }}"
-  vars:
-    address: "{{ hostvars[item.item].jenkins_agent_address }}"
-  loop: "{{ agent_hostkeys.results }}"
-  loop_control:
-    label: "{{ item.item }} ({{ address }})"
-  become: true
-  become_user: jenkins
+# Ghi lại cả file từ danh sách agent hiện tại → agent bị bỏ khỏi inventory cũng mất khỏi known_hosts.
+# File này chỉ dùng cho controller → agent. Port khác 22 → dạng [addr]:port (chuẩn OpenSSH).
+- name: Trust agent host keys (known_hosts)
+  ansible.builtin.copy:
+    dest: "{{ jenkins_home }}/.ssh/known_hosts"
+    owner: jenkins
+    group: jenkins
+    mode: "0644"
+    content: |
+      # Managed by Ansible (configure.yml) — sửa tay sẽ bị ghi đè
+      {% for r in agent_hostkeys.results | default([]) %}
+      {% set h = hostvars[r.item] %}
+      {% set port = h.jenkins_agent_ssh_port | int %}
+      {{ h.jenkins_agent_address if port == 22 else '[' ~ h.jenkins_agent_address ~ ']:' ~ port }} {{ (r.content | b64decode).split()[0:2] | join(' ') }}
+      {% endfor %}
 
 # ---------------- Ghi cấu hình ----------------
 - name: CasC dirs

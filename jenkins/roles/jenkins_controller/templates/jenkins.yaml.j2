@@ -25,7 +25,7 @@ jenkins:
         launcher:
           ssh:
             host: "{{ hostvars[a].jenkins_agent_address }}"
-            port: 22
+            port: {{ hostvars[a].jenkins_agent_ssh_port }}
             credentialsId: jenkins-agent-ssh
             javaPath: "{{ hostvars[a].jenkins_java_bin }}"
             sshHostKeyVerificationStrategy:

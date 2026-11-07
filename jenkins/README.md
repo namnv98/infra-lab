@@ -77,6 +77,7 @@ credentials/, bundle/          sinh ra, gitignore
 | `jenkins_controller_executors` | `2` | chỉ áp dụng khi standalone |
 | `jenkins_agent_executors` / `_labels` | `2` / `linux` | ghi đè được từng host |
 | `jenkins_agent_address` | IP nội bộ agent | controller SSH vào địa chỉ này; khác mạng → đặt IP public |
+| `jenkins_agent_ssh_port` | `ansible_port` hoặc 22 | port SSH controller → agent |
 | `jenkins_bundle_arches` | `[x64]` | kiến trúc CPU cần có trong bundle |
 
 ## Giới hạn
@@ -85,7 +86,6 @@ credentials/, bundle/          sinh ra, gitignore
 - Offline: bundle không chứa gói OS. Bộ cài thử cài `git` và `fontconfig` qua package manager (nếu VM có mirror nội bộ). Nếu không được: agent thiếu git chỉ bị **cảnh báo**, còn controller thiếu fontconfig thì bộ cài **dừng**, vì Jenkins không khởi động được nếu không có font. Image tối giản như Debian 12 trên GCE không có sẵn fontconfig.
 - Bộ cài chỉ **thêm** plugin, không gỡ plugin. Muốn nâng thì dùng `jenkins_upgrade` (xem bảng thao tác).
 - Không hỗ trợ đổi một máy đang cài online sang offline (hoặc ngược lại): war và unit của hai kiểu cài sẽ đè nhau. Muốn đổi thì cài lên máy mới.
-- Bỏ agent khỏi inventory thì node bị xoá khỏi Jenkins, nhưng known_hosts trên controller và `authorized_keys` trên máy agent cũ vẫn còn.
-- Đổi JRE trên agent (offline) không tự kết nối lại agent. Muốn agent dùng JRE mới thì disconnect/launch lại node trên UI.
-- Agent nghe SSH ở port 22.
+- Bỏ agent khỏi inventory thì node và known_hosts trên controller được dọn, nhưng `authorized_keys` trên máy agent cũ vẫn còn, vì bộ cài không còn quản lý máy đó.
+- Offline: mỗi bản JRE nằm ở `/opt/java/<tên bản>`, còn `/opt/java/jre-21` là symlink trỏ tới bản đang dùng (và `/usr/local/bin/java` trỏ vào đó). Khi đổi JRE, agent đang chạy vẫn giữ bản cũ cho tới lần kết nối lại. Bản cũ không bị xoá, xoá tay khi không còn dùng.
 - Firewall (port 8080, SSH controller → agent) không nằm trong bộ cài.
